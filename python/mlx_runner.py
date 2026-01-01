@@ -148,8 +148,42 @@ def cmd_list(args):
 
 def cmd_remove(args):
     """Remove a locally downloaded model."""
-    print(json.dumps({"error": "not implemented"}))
-    sys.exit(1)
+    from huggingface_hub import scan_cache_dir
+
+    try:
+        cache_info = scan_cache_dir()
+
+        # Find the model in cache
+        target_repo = None
+        for repo in cache_info.repos:
+            if repo.repo_id == args.model_id:
+                target_repo = repo
+                break
+
+        if not target_repo:
+            print(json.dumps({"error": f"Model not found in cache: {args.model_id}"}))
+            sys.exit(1)
+
+        # Get size before deletion
+        size_bytes = target_repo.size_on_disk
+
+        # Delete all revisions
+        delete_strategy = cache_info.delete_revisions(
+            *[rev.commit_hash for rev in target_repo.revisions]
+        )
+
+        # Execute deletion
+        delete_strategy.execute()
+
+        print(json.dumps({
+            "status": "removed",
+            "model_id": args.model_id,
+            "freed_bytes": size_bytes,
+            "freed_human": f"{size_bytes / (1024**3):.1f} GB",
+        }))
+    except Exception as e:
+        print(json.dumps({"error": str(e)}))
+        sys.exit(1)
 
 
 def cmd_infer(args):
