@@ -10,6 +10,17 @@ import sys
 from pathlib import Path
 
 
+def _format_timestamp(ts) -> str:
+    """Convert timestamp to ISO format string, handling both datetime and float."""
+    from datetime import datetime
+    if isinstance(ts, (int, float)):
+        return datetime.fromtimestamp(ts).isoformat()
+    elif hasattr(ts, 'isoformat'):
+        return ts.isoformat()
+    else:
+        return str(ts)
+
+
 def cmd_search(args):
     """Search Hugging Face Hub for MLX-compatible models."""
     from huggingface_hub import HfApi
@@ -35,7 +46,7 @@ def cmd_search(args):
                 "downloads": model.downloads or 0,
                 "likes": model.likes or 0,
                 "tags": model.tags or [],
-                "last_modified": model.last_modified.isoformat() if model.last_modified else None,
+                "last_modified": _format_timestamp(model.last_modified) if model.last_modified else None,
             })
 
         # If we didn't find enough, also search for mlx tag
@@ -56,7 +67,7 @@ def cmd_search(args):
                         "downloads": model.downloads or 0,
                         "likes": model.likes or 0,
                         "tags": model.tags or [],
-                        "last_modified": model.last_modified.isoformat() if model.last_modified else None,
+                        "last_modified": _format_timestamp(model.last_modified) if model.last_modified else None,
                     })
 
         # Sort by downloads
@@ -126,14 +137,14 @@ def cmd_list(args):
             # Only include MLX models (from mlx-community or with mlx in name)
             if "mlx" in repo.repo_id.lower() or repo.repo_id.startswith("mlx-community/"):
                 # Get the most recent revision
-                revisions = sorted(repo.revisions, key=lambda r: r.last_modified, reverse=True)
+                revisions = sorted(repo.revisions, key=lambda r: r.last_modified if isinstance(r.last_modified, (int, float)) else r.last_modified.timestamp(), reverse=True)
                 if revisions:
                     latest = revisions[0]
                     models.append({
                         "model_id": repo.repo_id,
                         "size_bytes": repo.size_on_disk,
                         "size_human": f"{repo.size_on_disk / (1024**3):.1f} GB",
-                        "last_modified": latest.last_modified.isoformat(),
+                        "last_modified": _format_timestamp(latest.last_modified),
                         "path": str(latest.snapshot_path),
                     })
 
@@ -206,8 +217,8 @@ def cmd_infer(args):
             sys.exit(1)
 
         # Import MLX only after confirming model exists
-        from mlx_lm import load
-        from mlx_lm.utils import stream_generate
+        from mlx_lm import load, stream_generate
+        from mlx_lm.sample_utils import make_sampler
 
         # Load model and tokenizer
         print(json.dumps({"type": "status", "message": "Loading model..."}), flush=True)
@@ -222,6 +233,9 @@ def cmd_infer(args):
         else:
             prompt = args.prompt
 
+        # Create sampler with temperature
+        sampler = make_sampler(temp=args.temperature)
+
         # Stream tokens
         print(json.dumps({"type": "status", "message": "Generating..."}), flush=True)
 
@@ -229,14 +243,16 @@ def cmd_infer(args):
         import time
         start_time = time.time()
 
-        for token_text in stream_generate(
+        for response in stream_generate(
             model,
             tokenizer,
             prompt=prompt,
             max_tokens=args.max_tokens,
-            temp=args.temperature,
+            sampler=sampler,
         ):
             tokens_generated += 1
+            # response is a GenerationResponse with .text attribute
+            token_text = response.text if hasattr(response, 'text') else str(response)
             print(json.dumps({"type": "token", "content": token_text}), flush=True)
 
         elapsed = time.time() - start_time
