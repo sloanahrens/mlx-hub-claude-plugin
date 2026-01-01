@@ -42,7 +42,7 @@ def cmd_search(args):
         if len(results) < args.limit:
             mlx_tagged = api.list_models(
                 search=args.query,
-                tags="mlx",
+                filter="mlx",
                 sort="downloads",
                 direction=-1,
                 limit=args.limit - len(results),
