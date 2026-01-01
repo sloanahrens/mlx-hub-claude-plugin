@@ -20,13 +20,15 @@ pip install -r python/requirements.txt  # Install Python deps
 ## Testing
 
 ```bash
-# Test Python runner directly
+# Run all TypeScript tests (44 tests)
+npm test
+
+# Run all Python tests (11 tests)
+python3 -m unittest python/test_mlx_runner.py
+
+# Manual testing - Python runner directly
 python3 python/mlx_runner.py list
 python3 python/mlx_runner.py search "llama" --limit 5
-
-# Build and test MCP server
-npm run build
-node dist/mcp-server.js  # Runs via stdio
 ```
 
 ## Key Files

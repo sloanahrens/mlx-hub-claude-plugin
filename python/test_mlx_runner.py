@@ -1,0 +1,306 @@
+#!/usr/bin/env python3
+"""
+Tests for mlx_runner.py
+
+Uses unittest (built-in) so no extra dependencies needed.
+Run with: python3 -m unittest python/test_mlx_runner.py
+"""
+
+import unittest
+from unittest.mock import patch, MagicMock
+import json
+import sys
+from io import StringIO
+from pathlib import Path
+
+# Add python directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent))
+
+from mlx_runner import _format_timestamp
+
+
+class TestFormatTimestamp(unittest.TestCase):
+    """Test the timestamp formatting helper."""
+
+    def test_formats_float_timestamp(self):
+        result = _format_timestamp(1704067200.0)  # 2024-01-01 00:00:00 UTC
+        # Accept any valid ISO format (timezone may vary)
+        self.assertRegex(result, r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
+
+    def test_formats_datetime_object(self):
+        from datetime import datetime
+        dt = datetime(2024, 6, 15, 12, 30, 0)
+        result = _format_timestamp(dt)
+        self.assertEqual(result, "2024-06-15T12:30:00")
+
+    def test_formats_string_fallback(self):
+        result = _format_timestamp("some-string")
+        self.assertEqual(result, "some-string")
+
+
+class TestCmdSearch(unittest.TestCase):
+    """Test the search command."""
+
+    @patch('huggingface_hub.HfApi')
+    def test_search_returns_results(self, mock_api_class):
+        from mlx_runner import cmd_search
+
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+
+        # Create mock model objects
+        mock_model = MagicMock()
+        mock_model.id = "mlx-community/Test-Model"
+        mock_model.downloads = 1000
+        mock_model.likes = 50
+        mock_model.tags = ["mlx"]
+        mock_model.last_modified = 1704067200.0
+
+        mock_api.list_models.return_value = [mock_model]
+
+        # Capture stdout
+        captured = StringIO()
+        sys.stdout = captured
+
+        args = MagicMock()
+        args.query = "test"
+        args.limit = 10
+
+        cmd_search(args)
+
+        sys.stdout = sys.__stdout__
+        output = captured.getvalue()
+
+        result = json.loads(output.strip().split('\n')[-1])
+        self.assertIn("results", result)
+        self.assertEqual(len(result["results"]), 1)
+        self.assertEqual(result["results"][0]["model_id"], "mlx-community/Test-Model")
+        self.assertEqual(result["results"][0]["downloads"], 1000)
+
+    @patch('huggingface_hub.HfApi')
+    def test_search_handles_error(self, mock_api_class):
+        from mlx_runner import cmd_search
+
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+        mock_api.list_models.side_effect = Exception("Network error")
+
+        captured = StringIO()
+        sys.stdout = captured
+
+        args = MagicMock()
+        args.query = "test"
+        args.limit = 10
+
+        with self.assertRaises(SystemExit) as cm:
+            cmd_search(args)
+
+        self.assertEqual(cm.exception.code, 1)
+
+        sys.stdout = sys.__stdout__
+        output = captured.getvalue()
+        result = json.loads(output.strip())
+        self.assertIn("error", result)
+        self.assertIn("Network error", result["error"])
+
+
+class TestCmdList(unittest.TestCase):
+    """Test the list command."""
+
+    @patch('huggingface_hub.scan_cache_dir')
+    def test_list_shows_mlx_models(self, mock_scan):
+        from mlx_runner import cmd_list
+
+        mock_cache = MagicMock()
+
+        # Create mock repo
+        mock_repo = MagicMock()
+        mock_repo.repo_id = "mlx-community/Llama-Test"
+        mock_repo.size_on_disk = 1024 * 1024 * 1024  # 1 GB
+
+        mock_revision = MagicMock()
+        mock_revision.last_modified = 1704067200.0
+        mock_revision.snapshot_path = "/path/to/model"
+        mock_repo.revisions = [mock_revision]
+
+        mock_cache.repos = [mock_repo]
+        mock_scan.return_value = mock_cache
+
+        captured = StringIO()
+        sys.stdout = captured
+
+        args = MagicMock()
+        cmd_list(args)
+
+        sys.stdout = sys.__stdout__
+        output = captured.getvalue()
+        result = json.loads(output.strip())
+
+        self.assertIn("models", result)
+        self.assertEqual(len(result["models"]), 1)
+        self.assertEqual(result["models"][0]["model_id"], "mlx-community/Llama-Test")
+        self.assertIn("1.0 GB", result["models"][0]["size_human"])
+
+    @patch('huggingface_hub.scan_cache_dir')
+    def test_list_filters_non_mlx_models(self, mock_scan):
+        from mlx_runner import cmd_list
+
+        mock_cache = MagicMock()
+
+        # Create non-MLX model
+        mock_repo = MagicMock()
+        mock_repo.repo_id = "openai/whisper-large"  # Not MLX
+        mock_repo.size_on_disk = 1024 * 1024 * 1024
+        mock_revision = MagicMock()
+        mock_revision.last_modified = 1704067200.0
+        mock_revision.snapshot_path = "/path/to/model"
+        mock_repo.revisions = [mock_revision]
+
+        mock_cache.repos = [mock_repo]
+        mock_scan.return_value = mock_cache
+
+        captured = StringIO()
+        sys.stdout = captured
+
+        args = MagicMock()
+        cmd_list(args)
+
+        sys.stdout = sys.__stdout__
+        output = captured.getvalue()
+        result = json.loads(output.strip())
+
+        self.assertEqual(len(result["models"]), 0)
+
+
+class TestCmdDownload(unittest.TestCase):
+    """Test the download command."""
+
+    @patch('huggingface_hub.snapshot_download')
+    @patch('huggingface_hub.HfApi')
+    def test_download_success(self, mock_api_class, mock_download):
+        from mlx_runner import cmd_download
+
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+        mock_api.model_info.return_value = MagicMock()
+
+        # Mock the download to return a temp path
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a dummy file so size calculation works
+            dummy_file = Path(tmpdir) / "model.bin"
+            dummy_file.write_bytes(b"x" * 1000)
+
+            mock_download.return_value = tmpdir
+
+            captured = StringIO()
+            sys.stdout = captured
+
+            args = MagicMock()
+            args.model_id = "mlx-community/Test"
+            args.quantize = None
+
+            cmd_download(args)
+
+            sys.stdout = sys.__stdout__
+            output = captured.getvalue()
+            lines = output.strip().split('\n')
+            result = json.loads(lines[-1])
+
+            self.assertEqual(result["status"], "complete")
+            self.assertEqual(result["model_id"], "mlx-community/Test")
+            self.assertIn("size_bytes", result)
+
+    @patch('huggingface_hub.HfApi')
+    def test_download_model_not_found(self, mock_api_class):
+        from huggingface_hub.utils import RepositoryNotFoundError
+        from mlx_runner import cmd_download
+
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+        # RepositoryNotFoundError requires a response object
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        mock_api.model_info.side_effect = RepositoryNotFoundError("Not found", response=mock_response)
+
+        captured = StringIO()
+        sys.stdout = captured
+
+        args = MagicMock()
+        args.model_id = "fake/model"
+
+        with self.assertRaises(SystemExit) as cm:
+            cmd_download(args)
+
+        self.assertEqual(cm.exception.code, 1)
+
+        sys.stdout = sys.__stdout__
+        output = captured.getvalue()
+        result = json.loads(output.strip())
+        self.assertIn("error", result)
+        self.assertIn("not found", result["error"].lower())
+
+
+class TestCmdRemove(unittest.TestCase):
+    """Test the remove command."""
+
+    @patch('huggingface_hub.scan_cache_dir')
+    def test_remove_model_not_in_cache(self, mock_scan):
+        from mlx_runner import cmd_remove
+
+        mock_cache = MagicMock()
+        mock_cache.repos = []
+        mock_scan.return_value = mock_cache
+
+        captured = StringIO()
+        sys.stdout = captured
+
+        args = MagicMock()
+        args.model_id = "nonexistent/model"
+
+        with self.assertRaises(SystemExit) as cm:
+            cmd_remove(args)
+
+        self.assertEqual(cm.exception.code, 1)
+
+        sys.stdout = sys.__stdout__
+        output = captured.getvalue()
+        result = json.loads(output.strip())
+        self.assertIn("error", result)
+        self.assertIn("not found", result["error"].lower())
+
+
+class TestCmdInfer(unittest.TestCase):
+    """Test the infer command."""
+
+    @patch('huggingface_hub.scan_cache_dir')
+    def test_infer_model_not_downloaded(self, mock_scan):
+        from mlx_runner import cmd_infer
+
+        mock_cache = MagicMock()
+        mock_cache.repos = []
+        mock_scan.return_value = mock_cache
+
+        captured = StringIO()
+        sys.stdout = captured
+
+        args = MagicMock()
+        args.model_id = "not-downloaded/model"
+        args.prompt = "Hello"
+        args.max_tokens = 100
+        args.temperature = 0.7
+
+        with self.assertRaises(SystemExit) as cm:
+            cmd_infer(args)
+
+        self.assertEqual(cm.exception.code, 1)
+
+        sys.stdout = sys.__stdout__
+        output = captured.getvalue()
+        result = json.loads(output.strip())
+        self.assertIn("error", result)
+        self.assertIn("not found locally", result["error"].lower())
+
+
+if __name__ == "__main__":
+    unittest.main()
