@@ -188,8 +188,73 @@ def cmd_remove(args):
 
 def cmd_infer(args):
     """Run inference on a model (streaming output)."""
-    print(json.dumps({"error": "not implemented"}))
-    sys.exit(1)
+    try:
+        # Check if model exists locally first (before importing MLX)
+        from huggingface_hub import scan_cache_dir
+        cache_info = scan_cache_dir()
+
+        model_path = None
+        for repo in cache_info.repos:
+            if repo.repo_id == args.model_id:
+                revisions = sorted(repo.revisions, key=lambda r: r.last_modified, reverse=True)
+                if revisions:
+                    model_path = str(revisions[0].snapshot_path)
+                break
+
+        if not model_path:
+            print(json.dumps({"error": f"Model not found locally: {args.model_id}. Run download first."}))
+            sys.exit(1)
+
+        # Import MLX only after confirming model exists
+        from mlx_lm import load
+        from mlx_lm.utils import stream_generate
+
+        # Load model and tokenizer
+        print(json.dumps({"type": "status", "message": "Loading model..."}), flush=True)
+        model, tokenizer = load(model_path)
+
+        # Format prompt for chat models
+        if hasattr(tokenizer, "apply_chat_template"):
+            messages = [{"role": "user", "content": args.prompt}]
+            prompt = tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+        else:
+            prompt = args.prompt
+
+        # Stream tokens
+        print(json.dumps({"type": "status", "message": "Generating..."}), flush=True)
+
+        tokens_generated = 0
+        import time
+        start_time = time.time()
+
+        for token_text in stream_generate(
+            model,
+            tokenizer,
+            prompt=prompt,
+            max_tokens=args.max_tokens,
+            temp=args.temperature,
+        ):
+            tokens_generated += 1
+            print(json.dumps({"type": "token", "content": token_text}), flush=True)
+
+        elapsed = time.time() - start_time
+        tokens_per_sec = tokens_generated / elapsed if elapsed > 0 else 0
+
+        print(json.dumps({
+            "type": "done",
+            "tokens_generated": tokens_generated,
+            "tokens_per_sec": round(tokens_per_sec, 1),
+            "elapsed_sec": round(elapsed, 2),
+        }), flush=True)
+
+    except ImportError as e:
+        print(json.dumps({"error": f"MLX not installed: {e}. Run: pip install mlx mlx-lm"}))
+        sys.exit(1)
+    except Exception as e:
+        print(json.dumps({"error": str(e)}))
+        sys.exit(1)
 
 
 def main():
