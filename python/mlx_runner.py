@@ -12,8 +12,61 @@ from pathlib import Path
 
 def cmd_search(args):
     """Search Hugging Face Hub for MLX-compatible models."""
-    print(json.dumps({"error": "not implemented"}))
-    sys.exit(1)
+    from huggingface_hub import HfApi
+
+    try:
+        api = HfApi()
+
+        # Search in mlx-community org and models with mlx tag
+        results = []
+
+        # Search mlx-community organization
+        models = api.list_models(
+            search=args.query,
+            author="mlx-community",
+            sort="downloads",
+            direction=-1,
+            limit=args.limit,
+        )
+
+        for model in models:
+            results.append({
+                "model_id": model.id,
+                "downloads": model.downloads or 0,
+                "likes": model.likes or 0,
+                "tags": model.tags or [],
+                "last_modified": model.last_modified.isoformat() if model.last_modified else None,
+            })
+
+        # If we didn't find enough, also search for mlx tag
+        if len(results) < args.limit:
+            mlx_tagged = api.list_models(
+                search=args.query,
+                tags="mlx",
+                sort="downloads",
+                direction=-1,
+                limit=args.limit - len(results),
+            )
+
+            existing_ids = {r["model_id"] for r in results}
+            for model in mlx_tagged:
+                if model.id not in existing_ids:
+                    results.append({
+                        "model_id": model.id,
+                        "downloads": model.downloads or 0,
+                        "likes": model.likes or 0,
+                        "tags": model.tags or [],
+                        "last_modified": model.last_modified.isoformat() if model.last_modified else None,
+                    })
+
+        # Sort by downloads
+        results.sort(key=lambda m: m["downloads"], reverse=True)
+        results = results[:args.limit]
+
+        print(json.dumps({"results": results, "count": len(results)}))
+    except Exception as e:
+        print(json.dumps({"error": str(e)}))
+        sys.exit(1)
 
 
 def cmd_download(args):
