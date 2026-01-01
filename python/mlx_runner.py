@@ -24,8 +24,34 @@ def cmd_download(args):
 
 def cmd_list(args):
     """List locally downloaded models."""
-    print(json.dumps({"error": "not implemented"}))
-    sys.exit(1)
+    from huggingface_hub import scan_cache_dir
+
+    try:
+        cache_info = scan_cache_dir()
+        models = []
+
+        for repo in cache_info.repos:
+            # Only include MLX models (from mlx-community or with mlx in name)
+            if "mlx" in repo.repo_id.lower() or repo.repo_id.startswith("mlx-community/"):
+                # Get the most recent revision
+                revisions = sorted(repo.revisions, key=lambda r: r.last_modified, reverse=True)
+                if revisions:
+                    latest = revisions[0]
+                    models.append({
+                        "model_id": repo.repo_id,
+                        "size_bytes": repo.size_on_disk,
+                        "size_human": f"{repo.size_on_disk / (1024**3):.1f} GB",
+                        "last_modified": latest.last_modified.isoformat(),
+                        "path": str(latest.snapshot_path),
+                    })
+
+        # Sort by last modified (most recent first)
+        models.sort(key=lambda m: m["last_modified"], reverse=True)
+
+        print(json.dumps({"models": models, "total_size_bytes": sum(m["size_bytes"] for m in models)}))
+    except Exception as e:
+        print(json.dumps({"error": str(e)}))
+        sys.exit(1)
 
 
 def cmd_remove(args):
