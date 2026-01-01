@@ -71,8 +71,47 @@ def cmd_search(args):
 
 def cmd_download(args):
     """Download a model from Hugging Face Hub."""
-    print(json.dumps({"error": "not implemented"}))
-    sys.exit(1)
+    from huggingface_hub import snapshot_download, HfApi
+    from huggingface_hub.utils import GatedRepoError, RepositoryNotFoundError
+
+    try:
+        api = HfApi()
+
+        # Check if model exists
+        try:
+            model_info = api.model_info(args.model_id)
+        except RepositoryNotFoundError:
+            print(json.dumps({"error": f"Model not found: {args.model_id}"}))
+            sys.exit(1)
+        except GatedRepoError:
+            print(json.dumps({
+                "error": f"Model {args.model_id} is gated. Run 'huggingface-cli login' first.",
+                "gated": True
+            }))
+            sys.exit(1)
+
+        # Download the model
+        print(json.dumps({"status": "downloading", "model_id": args.model_id}), flush=True)
+
+        path = snapshot_download(
+            repo_id=args.model_id,
+            local_dir_use_symlinks=False,
+        )
+
+        # Get size on disk
+        from pathlib import Path
+        total_size = sum(f.stat().st_size for f in Path(path).rglob("*") if f.is_file())
+
+        print(json.dumps({
+            "status": "complete",
+            "model_id": args.model_id,
+            "path": path,
+            "size_bytes": total_size,
+            "size_human": f"{total_size / (1024**3):.1f} GB",
+        }))
+    except Exception as e:
+        print(json.dumps({"error": str(e)}))
+        sys.exit(1)
 
 
 def cmd_list(args):
