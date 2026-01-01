@@ -17,6 +17,11 @@ import {
   RemoveInputSchema,
   InferInputSchema,
 } from './types.js';
+import {
+  runPythonCommand,
+  runInferenceStreaming,
+  StreamToken,
+} from './python-runner.js';
 
 // Create MCP Server
 const server = new Server(
@@ -98,13 +103,143 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 // Handle Tool Calls
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
+  try {
+    const { name, arguments: args } = request.params;
 
-  // TODO: Implement tool handlers
-  return {
-    content: [{ type: 'text', text: `Tool ${name} not yet implemented` }],
-    isError: true,
-  };
+    if (name === 'mlx_search') {
+      const params = SearchInputSchema.parse(args);
+      const result = await runPythonCommand('search', [
+        params.query,
+        '--limit', params.limit.toString(),
+      ]);
+
+      if (!result.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${result.error}` }],
+          isError: true,
+        };
+      }
+
+      const data = result.data as { results: Array<{ model_id: string; downloads: number; likes: number }> };
+      const formatted = data.results
+        .map((m, i) => `${i + 1}. ${m.model_id} (${m.downloads.toLocaleString()} downloads, ${m.likes} likes)`)
+        .join('\n');
+
+      return {
+        content: [{ type: 'text', text: `Found ${data.results.length} MLX-compatible models:\n\n${formatted}` }],
+      };
+    }
+
+    if (name === 'mlx_download') {
+      const params = DownloadInputSchema.parse(args);
+      const cmdArgs = [params.model_id];
+      if (params.quantization) {
+        cmdArgs.push('--quantize', params.quantization);
+      }
+
+      const result = await runPythonCommand('download', cmdArgs);
+
+      if (!result.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${result.error}` }],
+          isError: true,
+        };
+      }
+
+      const data = result.data as { model_id: string; path: string; size_human: string };
+      return {
+        content: [{ type: 'text', text: `Downloaded ${data.model_id}\nSize: ${data.size_human}\nPath: ${data.path}` }],
+      };
+    }
+
+    if (name === 'mlx_list_local') {
+      ListInputSchema.parse(args);
+      const result = await runPythonCommand('list', []);
+
+      if (!result.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${result.error}` }],
+          isError: true,
+        };
+      }
+
+      const data = result.data as { models: Array<{ model_id: string; size_human: string; last_modified: string }> };
+
+      if (data.models.length === 0) {
+        return {
+          content: [{ type: 'text', text: 'No MLX models found locally. Use mlx_search and mlx_download to get started.' }],
+        };
+      }
+
+      const formatted = data.models
+        .map((m) => `- ${m.model_id} (${m.size_human}, last used: ${new Date(m.last_modified).toLocaleDateString()})`)
+        .join('\n');
+
+      return {
+        content: [{ type: 'text', text: `Local MLX models:\n\n${formatted}` }],
+      };
+    }
+
+    if (name === 'mlx_remove') {
+      const params = RemoveInputSchema.parse(args);
+      const result = await runPythonCommand('remove', [params.model_id]);
+
+      if (!result.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${result.error}` }],
+          isError: true,
+        };
+      }
+
+      const data = result.data as { model_id: string; freed_human: string };
+      return {
+        content: [{ type: 'text', text: `Removed ${data.model_id}\nFreed: ${data.freed_human}` }],
+      };
+    }
+
+    if (name === 'mlx_infer') {
+      const params = InferInputSchema.parse(args);
+
+      let output = '';
+      const result = await runInferenceStreaming(
+        params.model_id,
+        params.prompt,
+        params.max_tokens,
+        params.temperature,
+        (token: StreamToken) => {
+          if (token.type === 'token' && token.content) {
+            output += token.content;
+          }
+        }
+      );
+
+      if (!result.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${result.error}` }],
+          isError: true,
+        };
+      }
+
+      const data = result.data as { tokens_generated: number; tokens_per_sec: number };
+      return {
+        content: [{
+          type: 'text',
+          text: `${output}\n\n---\n${data.tokens_generated} tokens @ ${data.tokens_per_sec} tok/s`
+        }],
+      };
+    }
+
+    return {
+      content: [{ type: 'text', text: `Unknown tool: ${name}` }],
+      isError: true,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      content: [{ type: 'text', text: `Error: ${message}` }],
+      isError: true,
+    };
+  }
 });
 
 // Main
