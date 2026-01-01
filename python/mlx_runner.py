@@ -273,6 +273,102 @@ def cmd_infer(args):
         sys.exit(1)
 
 
+def cmd_info(args):
+    """Get detailed information about a model from HF Hub."""
+    from huggingface_hub import HfApi, hf_hub_download
+    from huggingface_hub.utils import RepositoryNotFoundError, EntryNotFoundError
+
+    try:
+        api = HfApi()
+
+        # Get model info from Hub
+        try:
+            model = api.model_info(args.model_id)
+        except RepositoryNotFoundError:
+            print(json.dumps({"error": f"Model not found: {args.model_id}"}))
+            sys.exit(1)
+
+        # Basic info from model card
+        info = {
+            "model_id": model.id,
+            "downloads": model.downloads or 0,
+            "likes": model.likes or 0,
+            "tags": model.tags or [],
+            "last_modified": _format_timestamp(model.last_modified) if model.last_modified else None,
+            "pipeline_tag": model.pipeline_tag,
+            "library_name": model.library_name,
+        }
+
+        # Try to get config.json for model details
+        try:
+            config_path = hf_hub_download(
+                repo_id=args.model_id,
+                filename="config.json",
+                local_files_only=False,
+            )
+            import json as json_lib
+            with open(config_path) as f:
+                config = json_lib.load(f)
+
+            # Extract common config fields
+            if "max_position_embeddings" in config:
+                info["context_length"] = config["max_position_embeddings"]
+            elif "max_seq_len" in config:
+                info["context_length"] = config["max_seq_len"]
+            elif "n_positions" in config:
+                info["context_length"] = config["n_positions"]
+
+            if "hidden_size" in config:
+                info["hidden_size"] = config["hidden_size"]
+
+            if "num_hidden_layers" in config:
+                info["num_layers"] = config["num_hidden_layers"]
+
+            if "num_attention_heads" in config:
+                info["num_heads"] = config["num_attention_heads"]
+
+            # Try to estimate parameter count from architecture
+            if "hidden_size" in config and "num_hidden_layers" in config:
+                h = config["hidden_size"]
+                l = config["num_hidden_layers"]
+                # Rough estimate: ~12*h^2*l for transformer
+                estimated_params = 12 * h * h * l
+                info["estimated_params"] = estimated_params
+                if estimated_params >= 1e9:
+                    info["params_human"] = f"{estimated_params / 1e9:.1f}B"
+                elif estimated_params >= 1e6:
+                    info["params_human"] = f"{estimated_params / 1e6:.0f}M"
+
+            # Check for quantization info
+            if "quantization_config" in config:
+                qconfig = config["quantization_config"]
+                info["quantization"] = qconfig.get("quant_method", "quantized")
+                if "bits" in qconfig:
+                    info["quantization_bits"] = qconfig["bits"]
+
+        except (EntryNotFoundError, Exception):
+            # No config.json or couldn't parse - continue with basic info
+            pass
+
+        # Check if model is downloaded locally
+        from huggingface_hub import scan_cache_dir
+        cache_info = scan_cache_dir()
+        for repo in cache_info.repos:
+            if repo.repo_id == args.model_id:
+                info["is_local"] = True
+                info["local_size_bytes"] = repo.size_on_disk
+                info["local_size_human"] = f"{repo.size_on_disk / (1024**3):.1f} GB"
+                break
+        else:
+            info["is_local"] = False
+
+        print(json.dumps(info))
+
+    except Exception as e:
+        print(json.dumps({"error": str(e)}))
+        sys.exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(description="MLX model operations")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -305,6 +401,11 @@ def main():
     infer_parser.add_argument("--max-tokens", type=int, default=256)
     infer_parser.add_argument("--temperature", type=float, default=0.7)
     infer_parser.set_defaults(func=cmd_infer)
+
+    # info command
+    info_parser = subparsers.add_parser("info", help="Get model info")
+    info_parser.add_argument("model_id", help="Model ID (e.g., mlx-community/Llama-3.2-3B-4bit)")
+    info_parser.set_defaults(func=cmd_info)
 
     args = parser.parse_args()
     args.func(args)

@@ -302,5 +302,100 @@ class TestCmdInfer(unittest.TestCase):
         self.assertIn("not found locally", result["error"].lower())
 
 
+class TestCmdInfo(unittest.TestCase):
+    """Test the info command."""
+
+    @patch('huggingface_hub.scan_cache_dir')
+    @patch('huggingface_hub.hf_hub_download')
+    @patch('huggingface_hub.HfApi')
+    def test_info_returns_model_details(self, mock_api_class, mock_download, mock_scan):
+        from mlx_runner import cmd_info
+        import tempfile
+
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+
+        # Mock model info
+        mock_model = MagicMock()
+        mock_model.id = "mlx-community/Test-Model-4bit"
+        mock_model.downloads = 5000
+        mock_model.likes = 25
+        mock_model.tags = ["mlx", "text-generation"]
+        mock_model.last_modified = 1704067200.0
+        mock_model.pipeline_tag = "text-generation"
+        mock_model.library_name = "transformers"
+        mock_api.model_info.return_value = mock_model
+
+        # Mock config.json download
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            import json as json_lib
+            json_lib.dump({
+                "max_position_embeddings": 8192,
+                "hidden_size": 2048,
+                "num_hidden_layers": 16,
+                "num_attention_heads": 32,
+                "quantization_config": {"quant_method": "quantized", "bits": 4}
+            }, f)
+            config_path = f.name
+
+        mock_download.return_value = config_path
+
+        # Mock cache (model not local)
+        mock_cache = MagicMock()
+        mock_cache.repos = []
+        mock_scan.return_value = mock_cache
+
+        captured = StringIO()
+        sys.stdout = captured
+
+        args = MagicMock()
+        args.model_id = "mlx-community/Test-Model-4bit"
+
+        cmd_info(args)
+
+        sys.stdout = sys.__stdout__
+        output = captured.getvalue()
+        result = json.loads(output.strip())
+
+        self.assertEqual(result["model_id"], "mlx-community/Test-Model-4bit")
+        self.assertEqual(result["downloads"], 5000)
+        self.assertEqual(result["context_length"], 8192)
+        self.assertEqual(result["hidden_size"], 2048)
+        self.assertEqual(result["quantization_bits"], 4)
+        self.assertFalse(result["is_local"])
+
+        # Cleanup
+        import os
+        os.unlink(config_path)
+
+    @patch('huggingface_hub.HfApi')
+    def test_info_model_not_found(self, mock_api_class):
+        from huggingface_hub.utils import RepositoryNotFoundError
+        from mlx_runner import cmd_info
+
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        mock_api.model_info.side_effect = RepositoryNotFoundError("Not found", response=mock_response)
+
+        captured = StringIO()
+        sys.stdout = captured
+
+        args = MagicMock()
+        args.model_id = "fake/model"
+
+        with self.assertRaises(SystemExit) as cm:
+            cmd_info(args)
+
+        self.assertEqual(cm.exception.code, 1)
+
+        sys.stdout = sys.__stdout__
+        output = captured.getvalue()
+        result = json.loads(output.strip())
+        self.assertIn("error", result)
+        self.assertIn("not found", result["error"].lower())
+
+
 if __name__ == "__main__":
     unittest.main()

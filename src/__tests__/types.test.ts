@@ -5,6 +5,7 @@ import {
   ListInputSchema,
   RemoveInputSchema,
   InferInputSchema,
+  InfoInputSchema,
 } from '../types.js';
 
 describe('SearchInputSchema', () => {
@@ -138,5 +139,20 @@ describe('InferInputSchema', () => {
       temperature: 0,
     });
     expect(result.temperature).toBe(0);
+  });
+});
+
+describe('InfoInputSchema', () => {
+  it('accepts valid model_id', () => {
+    const result = InfoInputSchema.parse({ model_id: 'mlx-community/Llama-3.2-3B-Instruct-4bit' });
+    expect(result.model_id).toBe('mlx-community/Llama-3.2-3B-Instruct-4bit');
+  });
+
+  it('rejects empty model_id', () => {
+    expect(() => InfoInputSchema.parse({ model_id: '' })).toThrow();
+  });
+
+  it('rejects missing model_id', () => {
+    expect(() => InfoInputSchema.parse({})).toThrow();
   });
 });

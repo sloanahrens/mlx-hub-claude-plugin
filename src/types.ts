@@ -24,8 +24,13 @@ export const InferInputSchema = z.object({
   temperature: z.number().min(0).max(2).default(0.7),
 });
 
+export const InfoInputSchema = z.object({
+  model_id: z.string().min(1, 'Model ID is required'),
+});
+
 export type SearchInput = z.infer<typeof SearchInputSchema>;
 export type DownloadInput = z.infer<typeof DownloadInputSchema>;
 export type ListInput = z.infer<typeof ListInputSchema>;
 export type RemoveInput = z.infer<typeof RemoveInputSchema>;
 export type InferInput = z.infer<typeof InferInputSchema>;
+export type InfoInput = z.infer<typeof InfoInputSchema>;

@@ -16,6 +16,7 @@ import {
   ListInputSchema,
   RemoveInputSchema,
   InferInputSchema,
+  InfoInputSchema,
 } from './types.js';
 import {
   runPythonCommand,
@@ -95,6 +96,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             temperature: { type: 'number', minimum: 0, maximum: 2, default: 0.7, description: 'Sampling temperature' },
           },
           required: ['model_id', 'prompt'],
+        },
+      },
+      {
+        name: 'mlx_info',
+        description: 'Get detailed information about an MLX model from Hugging Face Hub. Shows parameters, context length, quantization, and local status.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            model_id: { type: 'string', minLength: 1, description: 'Model ID (e.g., mlx-community/Llama-3.2-3B-Instruct-4bit)' },
+          },
+          required: ['model_id'],
         },
       },
     ],
@@ -226,6 +238,46 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           type: 'text',
           text: `${output}\n\n---\n${data.tokens_generated} tokens @ ${data.tokens_per_sec} tok/s`
         }],
+      };
+    }
+
+    if (name === 'mlx_info') {
+      const params = InfoInputSchema.parse(args);
+      const result = await runPythonCommand('info', [params.model_id]);
+
+      if (!result.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${result.error}` }],
+          isError: true,
+        };
+      }
+
+      const data = result.data as {
+        model_id: string;
+        downloads: number;
+        likes: number;
+        context_length?: number;
+        params_human?: string;
+        quantization?: string;
+        quantization_bits?: number;
+        is_local: boolean;
+        local_size_human?: string;
+        pipeline_tag?: string;
+      };
+
+      // Format the output nicely
+      const lines = [
+        `Model: ${data.model_id}`,
+        data.params_human ? `Parameters: ${data.params_human}${data.quantization_bits ? ` (${data.quantization_bits}-bit)` : ''}` : null,
+        data.context_length ? `Context: ${data.context_length.toLocaleString()} tokens` : null,
+        data.pipeline_tag ? `Type: ${data.pipeline_tag}` : null,
+        `Downloads: ${data.downloads.toLocaleString()}`,
+        `Likes: ${data.likes}`,
+        `Local: ${data.is_local ? `Yes (${data.local_size_human})` : 'No'}`,
+      ].filter(Boolean);
+
+      return {
+        content: [{ type: 'text', text: lines.join('\n') }],
       };
     }
 
