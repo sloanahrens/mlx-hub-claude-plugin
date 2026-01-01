@@ -36,3 +36,21 @@ node dist/mcp-server.js  # Runs via stdio
 | `.claude-plugin/plugin.json` | Plugin manifest |
 | `src/mcp-server.ts` | MCP tool definitions and handlers |
 | `python/mlx_runner.py` | All MLX operations |
+
+## Development Setup
+
+To avoid reinstalling after every change, symlink the plugin cache to this repo:
+
+```bash
+# Remove the cache copy and symlink to dev repo
+rm -rf ~/.claude/plugins/cache/mlx-hub-dev/mlx-hub/0.1.0
+ln -s /Users/sloan/code/mono-claude/mlx-hub ~/.claude/plugins/cache/mlx-hub-dev/mlx-hub/0.1.0
+```
+
+After symlinking, the dev workflow is:
+1. Edit code in this repo
+2. Run `npm run build`
+3. Changes are live immediately
+4. Only restart Claude Code if the MCP server needs a full reload
+
+**Note**: If you bump version in `plugin.json`, update the symlink path to match (e.g., `0.2.0`).
