@@ -158,7 +158,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      const data = result.data as { model_id: string; path: string; size_human: string };
+      // Handle new format with type: "complete" or legacy format
+      const data = result.data as {
+        type?: string;
+        status?: string;
+        model_id: string;
+        path: string;
+        size_bytes?: number;
+        size_human: string;
+      };
+
       return {
         content: [{ type: 'text', text: `Downloaded ${data.model_id}\nSize: ${data.size_human}\nPath: ${data.path}` }],
       };

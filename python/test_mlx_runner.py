@@ -16,7 +16,7 @@ from pathlib import Path
 # Add python directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from mlx_runner import _format_timestamp
+from mlx_runner import _format_timestamp, JsonProgressBar
 
 
 class TestFormatTimestamp(unittest.TestCase):
@@ -36,6 +36,44 @@ class TestFormatTimestamp(unittest.TestCase):
     def test_formats_string_fallback(self):
         result = _format_timestamp("some-string")
         self.assertEqual(result, "some-string")
+
+
+class TestJsonProgressBar(unittest.TestCase):
+    """Test the JSON progress bar for downloads."""
+
+    def test_emits_progress_at_intervals(self):
+        captured = StringIO()
+        sys.stdout = captured
+
+        bar = JsonProgressBar(total=100, desc="test.bin")
+        # Update in small increments
+        for _ in range(100):
+            bar.update(1)
+        bar.close()
+
+        sys.stdout = sys.__stdout__
+        output = captured.getvalue()
+
+        # Should emit roughly every 5% (around 20 updates for 0-100%)
+        lines = [l for l in output.strip().split('\n') if l]
+        self.assertGreaterEqual(len(lines), 10)  # At least 10 updates
+        self.assertLessEqual(len(lines), 25)  # Not more than 25
+
+        # Check first progress update has expected format
+        first = json.loads(lines[0])
+        self.assertEqual(first["type"], "progress")
+        self.assertEqual(first["file"], "test.bin")
+        self.assertIn("percent", first)
+        self.assertLessEqual(first["percent"], 10)  # First emit is early
+
+        # Check last progress update is 100%
+        last = json.loads(lines[-1])
+        self.assertEqual(last["percent"], 100)
+
+    def test_context_manager(self):
+        with JsonProgressBar(total=10) as bar:
+            bar.update(10)
+        # Should not raise
 
 
 class TestCmdSearch(unittest.TestCase):
@@ -182,7 +220,13 @@ class TestCmdDownload(unittest.TestCase):
 
         mock_api = MagicMock()
         mock_api_class.return_value = mock_api
-        mock_api.model_info.return_value = MagicMock()
+
+        # Mock model info with siblings for size calculation
+        mock_model = MagicMock()
+        mock_sibling = MagicMock()
+        mock_sibling.size = 1024 * 1024  # 1 MB
+        mock_model.siblings = [mock_sibling]
+        mock_api.model_info.return_value = mock_model
 
         # Mock the download to return a temp path
         import tempfile
@@ -205,8 +249,17 @@ class TestCmdDownload(unittest.TestCase):
             sys.stdout = sys.__stdout__
             output = captured.getvalue()
             lines = output.strip().split('\n')
-            result = json.loads(lines[-1])
 
+            # First line should be status with total size info
+            status = json.loads(lines[0])
+            self.assertEqual(status["type"], "status")
+            self.assertEqual(status["status"], "downloading")
+            self.assertEqual(status["model_id"], "mlx-community/Test")
+            self.assertEqual(status["file_count"], 1)
+
+            # Last line should be completion
+            result = json.loads(lines[-1])
+            self.assertEqual(result["type"], "complete")
             self.assertEqual(result["status"], "complete")
             self.assertEqual(result["model_id"], "mlx-community/Test")
             self.assertIn("size_bytes", result)

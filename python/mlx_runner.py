@@ -80,6 +80,40 @@ def cmd_search(args):
         sys.exit(1)
 
 
+class JsonProgressBar:
+    """Custom tqdm-like class that emits JSON progress updates."""
+
+    def __init__(self, *args, total=None, desc=None, unit=None, **kwargs):
+        self.total = total or 0
+        self.desc = desc or ""
+        self.n = 0
+        self._last_percent = -1
+
+    def update(self, n=1):
+        self.n += n
+        if self.total > 0:
+            percent = int(100 * self.n / self.total)
+            # Only emit update every 5% to avoid flooding
+            if percent >= self._last_percent + 5 or percent == 100:
+                self._last_percent = percent
+                print(json.dumps({
+                    "type": "progress",
+                    "file": self.desc,
+                    "downloaded": self.n,
+                    "total": self.total,
+                    "percent": percent,
+                }), flush=True)
+
+    def close(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
 def cmd_download(args):
     """Download a model from Hugging Face Hub."""
     from huggingface_hub import snapshot_download, HfApi
@@ -88,9 +122,9 @@ def cmd_download(args):
     try:
         api = HfApi()
 
-        # Check if model exists
+        # Check if model exists and get size info
         try:
-            model_info = api.model_info(args.model_id)
+            model = api.model_info(args.model_id, files_metadata=True)
         except RepositoryNotFoundError:
             print(json.dumps({"error": f"Model not found: {args.model_id}"}))
             sys.exit(1)
@@ -101,24 +135,42 @@ def cmd_download(args):
             }))
             sys.exit(1)
 
-        # Download the model
-        print(json.dumps({"status": "downloading", "model_id": args.model_id}), flush=True)
+        # Calculate total size from siblings
+        total_size = 0
+        file_count = 0
+        if model.siblings:
+            for sibling in model.siblings:
+                if sibling.size is not None:
+                    total_size += sibling.size
+                    file_count += 1
+
+        # Start download with progress info
+        print(json.dumps({
+            "type": "status",
+            "status": "downloading",
+            "model_id": args.model_id,
+            "total_size": total_size,
+            "total_size_human": f"{total_size / (1024**3):.1f} GB" if total_size else "unknown",
+            "file_count": file_count,
+        }), flush=True)
 
         path = snapshot_download(
             repo_id=args.model_id,
             local_dir_use_symlinks=False,
+            tqdm_class=JsonProgressBar,
         )
 
-        # Get size on disk
+        # Get actual size on disk
         from pathlib import Path
-        total_size = sum(f.stat().st_size for f in Path(path).rglob("*") if f.is_file())
+        disk_size = sum(f.stat().st_size for f in Path(path).rglob("*") if f.is_file())
 
         print(json.dumps({
+            "type": "complete",
             "status": "complete",
             "model_id": args.model_id,
             "path": path,
-            "size_bytes": total_size,
-            "size_human": f"{total_size / (1024**3):.1f} GB",
+            "size_bytes": disk_size,
+            "size_human": f"{disk_size / (1024**3):.1f} GB",
         }))
     except Exception as e:
         print(json.dumps({"error": str(e)}))
