@@ -1,0 +1,16 @@
+{
+  "name": "mlx-hub",
+  "version": "0.1.0",
+  "description": "Discover, download, and run Hugging Face models locally with MLX",
+  "author": {
+    "name": "sloan"
+  },
+  "license": "MIT",
+  "keywords": ["mlx", "huggingface", "local-llm", "apple-silicon"],
+  "mcpServers": {
+    "mlx-hub": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/mcp-server.js"]
+    }
+  }
+}
