@@ -278,12 +278,19 @@ def cmd_infer(args):
 
         # Format prompt for chat models
         if hasattr(tokenizer, "apply_chat_template"):
-            messages = [{"role": "user", "content": args.prompt}]
+            messages = []
+            if args.system_prompt:
+                messages.append({"role": "system", "content": args.system_prompt})
+            messages.append({"role": "user", "content": args.prompt})
             prompt = tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
             )
         else:
-            prompt = args.prompt
+            # Non-chat model: prepend system prompt if provided
+            if args.system_prompt:
+                prompt = f"{args.system_prompt}\n\n{args.prompt}"
+            else:
+                prompt = args.prompt
 
         # Create sampler with temperature
         sampler = make_sampler(temp=args.temperature)
@@ -450,6 +457,7 @@ def main():
     infer_parser = subparsers.add_parser("infer", help="Run inference")
     infer_parser.add_argument("model_id", help="Model ID")
     infer_parser.add_argument("--prompt", required=True, help="Input prompt")
+    infer_parser.add_argument("--system-prompt", default=None, help="System prompt for chat models")
     infer_parser.add_argument("--max-tokens", type=int, default=256)
     infer_parser.add_argument("--temperature", type=float, default=0.7)
     infer_parser.set_defaults(func=cmd_infer)

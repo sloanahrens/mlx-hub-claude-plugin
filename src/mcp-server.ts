@@ -92,6 +92,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             model_id: { type: 'string', minLength: 1, description: 'Model ID (must be downloaded first)' },
             prompt: { type: 'string', minLength: 1, description: 'Input prompt for the model' },
+            system_prompt: { type: 'string', description: 'System prompt for chat models (optional)' },
             max_tokens: { type: 'number', minimum: 1, maximum: 4096, default: 256, description: 'Maximum tokens to generate' },
             temperature: { type: 'number', minimum: 0, maximum: 2, default: 0.7, description: 'Sampling temperature' },
           },
@@ -231,7 +232,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           if (token.type === 'token' && token.content) {
             output += token.content;
           }
-        }
+        },
+        params.system_prompt
       );
 
       if (!result.success) {

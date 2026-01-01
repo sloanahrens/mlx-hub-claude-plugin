@@ -85,17 +85,24 @@ export async function runInferenceStreaming(
   prompt: string,
   maxTokens: number,
   temperature: number,
-  onToken: (token: StreamToken) => void
+  onToken: (token: StreamToken) => void,
+  systemPrompt?: string
 ): Promise<PythonResult> {
   return new Promise((resolve) => {
-    const proc = spawn('python3', [
+    const args = [
       PYTHON_SCRIPT,
       'infer',
       modelId,
       '--prompt', prompt,
       '--max-tokens', maxTokens.toString(),
       '--temperature', temperature.toString(),
-    ]);
+    ];
+
+    if (systemPrompt) {
+      args.push('--system-prompt', systemPrompt);
+    }
+
+    const proc = spawn('python3', args);
 
     let buffer = '';
     let lastError = '';

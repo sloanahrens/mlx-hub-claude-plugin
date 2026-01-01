@@ -20,6 +20,7 @@ export const RemoveInputSchema = z.object({
 export const InferInputSchema = z.object({
   model_id: z.string().min(1, 'Model ID is required'),
   prompt: z.string().min(1, 'Prompt is required'),
+  system_prompt: z.string().optional(),
   max_tokens: z.number().int().min(1).max(4096).default(256),
   temperature: z.number().min(0).max(2).default(0.7),
 });

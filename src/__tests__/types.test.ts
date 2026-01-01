@@ -140,6 +140,23 @@ describe('InferInputSchema', () => {
     });
     expect(result.temperature).toBe(0);
   });
+
+  it('accepts optional system_prompt', () => {
+    const result = InferInputSchema.parse({
+      model_id: 'test/model',
+      prompt: 'Hello',
+      system_prompt: 'You are a helpful assistant.',
+    });
+    expect(result.system_prompt).toBe('You are a helpful assistant.');
+  });
+
+  it('works without system_prompt', () => {
+    const result = InferInputSchema.parse({
+      model_id: 'test/model',
+      prompt: 'Hello',
+    });
+    expect(result.system_prompt).toBeUndefined();
+  });
 });
 
 describe('InfoInputSchema', () => {
