@@ -15,8 +15,8 @@ Methods:
 - status: Report daemon status (model_id, is_ready, etc.)
 - unload: Unload model from memory
 - shutdown: Gracefully stop the daemon
-- infer: Run inference (stub - Task 3)
-- infer_messages: Run inference with messages (stub - Task 3)
+- infer: Run inference with prompt, streams tokens
+- infer_messages: Run inference with messages array, streams tokens
 """
 
 import argparse
@@ -27,8 +27,9 @@ import socket
 import sys
 import threading
 import time
+import types
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Generator, Optional, Union
 
 # JSON-RPC 2.0 error codes
 PARSE_ERROR = -32700
@@ -73,6 +74,7 @@ class MLXDaemon:
         self._server_socket: Optional[socket.socket] = None
         self._shutdown_event = threading.Event()
         self._client_threads: list[threading.Thread] = []
+        self._start_time = time.time()
         self._last_activity = time.time()
         self._activity_lock = threading.Lock()
 
@@ -96,6 +98,35 @@ class MLXDaemon:
         except ImportError:
             pass
         return None
+
+    def _ensure_model_loaded(self) -> tuple[bool, str]:
+        """
+        Ensure the model is loaded and ready for inference.
+
+        Returns:
+            Tuple of (success, error_message). If success is True, error_message is empty.
+        """
+        with self._model_lock:
+            if self.loaded_model is not None:
+                return (True, "")
+
+            # Find model path
+            model_path = self._find_model_path(self.model_id)
+            if not model_path:
+                return (False, f"Model not found locally: {self.model_id}. Run download first.")
+
+            try:
+                from mlx_lm import load
+
+                model, tokenizer = load(model_path)
+                self.loaded_model = model
+                self.loaded_tokenizer = tokenizer
+                self.loaded_model_path = model_path
+                return (True, "")
+            except ImportError as e:
+                return (False, f"MLX not installed: {e}. Run: pip install mlx mlx-lm")
+            except Exception as e:
+                return (False, f"Failed to load model: {e}")
 
     def _make_response(
         self, request_id: Optional[str], result: dict
@@ -132,8 +163,7 @@ class MLXDaemon:
         with self._model_lock:
             loaded_path = self.loaded_model_path
             is_ready = self.loaded_model is not None
-        with self._activity_lock:
-            uptime = time.time() - self._last_activity
+        uptime = time.time() - self._start_time
         return self._make_response(
             request_id,
             {
@@ -166,23 +196,160 @@ class MLXDaemon:
             {"type": "shutdown", "message": "Daemon shutting down"},
         )
 
-    def _handle_infer(self, request_id: str, params: dict) -> dict:
-        """Handle infer method (stub - will be implemented in Task 3)."""
-        return self._make_error(
-            request_id,
-            INTERNAL_ERROR,
-            "Not implemented: infer will be available in a future version",
-        )
+    def _handle_infer(
+        self, request_id: str, params: dict
+    ) -> Union[dict, Generator[dict, None, None]]:
+        """
+        Handle infer method - run inference with a prompt.
 
-    def _handle_infer_messages(self, request_id: str, params: dict) -> dict:
-        """Handle infer_messages method (stub - will be implemented in Task 3)."""
-        return self._make_error(
-            request_id,
-            INTERNAL_ERROR,
-            "Not implemented: infer_messages will be available in a future version",
-        )
+        Params:
+            prompt: The prompt text (required)
+            system_prompt: Optional system prompt
+            max_tokens: Maximum tokens to generate (default: 256)
+            temperature: Sampling temperature (default: 0.7)
 
-    def _dispatch(self, request: dict) -> dict:
+        Yields streaming responses:
+            {"type": "token", "content": "..."}
+            {"type": "done", "tokens_generated": N, "tokens_per_sec": X, "elapsed_sec": Y}
+        """
+        # Validate prompt
+        prompt = params.get("prompt")
+        if not prompt:
+            return self._make_error(
+                request_id,
+                INVALID_PARAMS,
+                "Missing required parameter: prompt",
+            )
+
+        # Build messages from prompt
+        messages = []
+        system_prompt = params.get("system_prompt")
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        # Delegate to _handle_infer_messages
+        return self._handle_infer_messages(request_id, {
+            "messages": messages,
+            "max_tokens": params.get("max_tokens", 256),
+            "temperature": params.get("temperature", 0.7),
+        })
+
+    def _handle_infer_messages(
+        self, request_id: str, params: dict
+    ) -> Union[dict, Generator[dict, None, None]]:
+        """
+        Handle infer_messages method - run inference with a messages array.
+
+        Params:
+            messages: Array of {"role": "...", "content": "..."} (required)
+            max_tokens: Maximum tokens to generate (default: 256)
+            temperature: Sampling temperature (default: 0.7)
+
+        Yields streaming responses:
+            {"type": "token", "content": "..."}
+            {"type": "done", "tokens_generated": N, "tokens_per_sec": X, "elapsed_sec": Y}
+        """
+        # Validate messages
+        messages = params.get("messages")
+        if not messages or not isinstance(messages, list):
+            return self._make_error(
+                request_id,
+                INVALID_PARAMS,
+                "Missing required parameter: messages (must be an array)",
+            )
+
+        max_tokens = min(params.get("max_tokens", 256), 4096)
+        temperature = params.get("temperature", 0.7)
+
+        # Ensure model is loaded
+        success, error_msg = self._ensure_model_loaded()
+        if not success:
+            return self._make_error(
+                request_id,
+                INTERNAL_ERROR,
+                error_msg,
+            )
+
+        # Generator for streaming tokens
+        def generate_tokens() -> Generator[dict, None, None]:
+            try:
+                from mlx_lm import stream_generate
+                from mlx_lm.sample_utils import make_sampler
+
+                with self._model_lock:
+                    model = self.loaded_model
+                    tokenizer = self.loaded_tokenizer
+
+                # Format prompt using chat template if available
+                if hasattr(tokenizer, "apply_chat_template"):
+                    prompt = tokenizer.apply_chat_template(
+                        messages, tokenize=False, add_generation_prompt=True
+                    )
+                else:
+                    # Fallback for non-chat models
+                    prompt_parts = []
+                    for msg in messages:
+                        role = msg.get("role", "user")
+                        content = msg.get("content", "")
+                        if role == "system":
+                            prompt_parts.insert(0, content)
+                        else:
+                            prompt_parts.append(content)
+                    prompt = "\n\n".join(prompt_parts)
+
+                # Create sampler
+                sampler = make_sampler(temp=temperature)
+
+                # Stream tokens
+                tokens_generated = 0
+                start_time = time.time()
+
+                for response in stream_generate(
+                    model,
+                    tokenizer,
+                    prompt=prompt,
+                    max_tokens=max_tokens,
+                    sampler=sampler,
+                ):
+                    tokens_generated += 1
+                    token_text = response.text if hasattr(response, "text") else str(response)
+                    yield self._make_response(
+                        request_id,
+                        {"type": "token", "content": token_text},
+                    )
+
+                elapsed = time.time() - start_time
+                tokens_per_sec = tokens_generated / elapsed if elapsed > 0 else 0
+
+                yield self._make_response(
+                    request_id,
+                    {
+                        "type": "done",
+                        "tokens_generated": tokens_generated,
+                        "tokens_per_sec": round(tokens_per_sec, 1),
+                        "elapsed_sec": round(elapsed, 2),
+                    },
+                )
+
+            except ImportError as e:
+                yield self._make_error(
+                    request_id,
+                    INTERNAL_ERROR,
+                    f"MLX not installed: {e}. Run: pip install mlx mlx-lm",
+                )
+            except Exception as e:
+                yield self._make_error(
+                    request_id,
+                    INTERNAL_ERROR,
+                    f"Inference error: {e}",
+                )
+
+        return generate_tokens()
+
+    def _dispatch(
+        self, request: dict
+    ) -> Union[dict, Generator[dict, None, None]]:
         """Dispatch a JSON-RPC request to the appropriate handler."""
         request_id = request.get("id")
         method = request.get("method", "")
@@ -264,9 +431,19 @@ class MLXDaemon:
 
                         # Dispatch and send response
                         response = self._dispatch(request)
-                        client_socket.sendall(
-                            (json.dumps(response) + "\n").encode("utf-8")
-                        )
+
+                        # Check if response is a generator (streaming)
+                        if isinstance(response, types.GeneratorType):
+                            # Streaming response - send each item
+                            for item in response:
+                                client_socket.sendall(
+                                    (json.dumps(item) + "\n").encode("utf-8")
+                                )
+                        else:
+                            # Single response
+                            client_socket.sendall(
+                                (json.dumps(response) + "\n").encode("utf-8")
+                            )
 
                         # Close connection after response
                         return
@@ -351,6 +528,9 @@ class MLXDaemon:
                     continue
 
         finally:
+            # Join all active client threads before cleanup
+            for t in self._client_threads:
+                t.join(timeout=2.0)
             self._cleanup()
             if self._server_socket:
                 try:

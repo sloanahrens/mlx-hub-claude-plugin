@@ -391,8 +391,8 @@ class TestDaemonSocketBasics(unittest.TestCase):
             daemon.stop()
             daemon_thread.join(timeout=2)
 
-    def test_daemon_infer_stub_returns_not_implemented(self):
-        """Daemon infer method returns not implemented (stub)."""
+    def test_daemon_infer_missing_prompt_returns_error(self):
+        """Daemon infer method returns error when prompt is missing."""
         from mlx_daemon import MLXDaemon
 
         daemon = MLXDaemon(
@@ -412,20 +412,20 @@ class TestDaemonSocketBasics(unittest.TestCase):
                 "jsonrpc": "2.0",
                 "id": "test-6",
                 "method": "infer",
-                "params": {"prompt": "Hello"},
+                "params": {},  # Missing prompt
             })
 
             self.assertEqual(response["jsonrpc"], "2.0")
             self.assertEqual(response["id"], "test-6")
-            # Should return error indicating not implemented
             self.assertIn("error", response)
-            self.assertIn("not implemented", response["error"]["message"].lower())
+            self.assertEqual(response["error"]["code"], -32602)  # Invalid params
+            self.assertIn("prompt", response["error"]["message"].lower())
         finally:
             daemon.stop()
             daemon_thread.join(timeout=2)
 
-    def test_daemon_infer_messages_stub_returns_not_implemented(self):
-        """Daemon infer_messages method returns not implemented (stub)."""
+    def test_daemon_infer_messages_missing_messages_returns_error(self):
+        """Daemon infer_messages method returns error when messages is missing."""
         from mlx_daemon import MLXDaemon
 
         daemon = MLXDaemon(
@@ -445,14 +445,112 @@ class TestDaemonSocketBasics(unittest.TestCase):
                 "jsonrpc": "2.0",
                 "id": "test-7",
                 "method": "infer_messages",
-                "params": {"messages": [{"role": "user", "content": "Hello"}]},
+                "params": {},  # Missing messages
             })
 
             self.assertEqual(response["jsonrpc"], "2.0")
             self.assertEqual(response["id"], "test-7")
-            # Should return error indicating not implemented
             self.assertIn("error", response)
-            self.assertIn("not implemented", response["error"]["message"].lower())
+            self.assertEqual(response["error"]["code"], -32602)  # Invalid params
+            self.assertIn("messages", response["error"]["message"].lower())
+        finally:
+            daemon.stop()
+            daemon_thread.join(timeout=2)
+
+    def test_daemon_infer_model_not_found_returns_error(self):
+        """Daemon infer returns error when model is not found locally."""
+        from mlx_daemon import MLXDaemon
+
+        daemon = MLXDaemon(
+            model_id="nonexistent/model-that-does-not-exist",
+            socket_path=str(self.socket_path),
+            idle_timeout=1800,
+        )
+
+        daemon_thread = threading.Thread(target=daemon.start)
+        daemon_thread.daemon = True
+        daemon_thread.start()
+
+        time.sleep(0.2)
+
+        try:
+            response = self._send_request({
+                "jsonrpc": "2.0",
+                "id": "test-8",
+                "method": "infer",
+                "params": {"prompt": "Hello, world!"},
+            })
+
+            self.assertEqual(response["jsonrpc"], "2.0")
+            self.assertEqual(response["id"], "test-8")
+            self.assertIn("error", response)
+            self.assertEqual(response["error"]["code"], -32603)  # Internal error
+            self.assertIn("not found", response["error"]["message"].lower())
+        finally:
+            daemon.stop()
+            daemon_thread.join(timeout=2)
+
+    def test_daemon_infer_messages_model_not_found_returns_error(self):
+        """Daemon infer_messages returns error when model is not found locally."""
+        from mlx_daemon import MLXDaemon
+
+        daemon = MLXDaemon(
+            model_id="nonexistent/model-that-does-not-exist",
+            socket_path=str(self.socket_path),
+            idle_timeout=1800,
+        )
+
+        daemon_thread = threading.Thread(target=daemon.start)
+        daemon_thread.daemon = True
+        daemon_thread.start()
+
+        time.sleep(0.2)
+
+        try:
+            response = self._send_request({
+                "jsonrpc": "2.0",
+                "id": "test-9",
+                "method": "infer_messages",
+                "params": {"messages": [{"role": "user", "content": "Hello"}]},
+            })
+
+            self.assertEqual(response["jsonrpc"], "2.0")
+            self.assertEqual(response["id"], "test-9")
+            self.assertIn("error", response)
+            self.assertEqual(response["error"]["code"], -32603)  # Internal error
+            self.assertIn("not found", response["error"]["message"].lower())
+        finally:
+            daemon.stop()
+            daemon_thread.join(timeout=2)
+
+    def test_daemon_infer_messages_invalid_messages_type_returns_error(self):
+        """Daemon infer_messages returns error when messages is not an array."""
+        from mlx_daemon import MLXDaemon
+
+        daemon = MLXDaemon(
+            model_id="test/model",
+            socket_path=str(self.socket_path),
+            idle_timeout=1800,
+        )
+
+        daemon_thread = threading.Thread(target=daemon.start)
+        daemon_thread.daemon = True
+        daemon_thread.start()
+
+        time.sleep(0.2)
+
+        try:
+            response = self._send_request({
+                "jsonrpc": "2.0",
+                "id": "test-10",
+                "method": "infer_messages",
+                "params": {"messages": "not an array"},
+            })
+
+            self.assertEqual(response["jsonrpc"], "2.0")
+            self.assertEqual(response["id"], "test-10")
+            self.assertIn("error", response)
+            self.assertEqual(response["error"]["code"], -32602)  # Invalid params
         finally:
             daemon.stop()
             daemon_thread.join(timeout=2)
