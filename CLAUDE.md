@@ -12,18 +12,20 @@ pip install -r python/requirements.txt  # Install Python deps
 
 ## Architecture
 
-- `src/mcp-server.ts` - MCP server exposing 5 tools
-- `src/python-runner.ts` - Spawns Python subprocess for MLX ops
-- `python/mlx_runner.py` - CLI for search, download, list, remove, infer
-- `commands/` - Slash commands (/mlx search, download, models, run)
+- `src/mcp-server.ts` - MCP server exposing 7 tools
+- `src/daemon-runner.ts` - Manages persistent Python daemon for fast inference
+- `src/python-runner.ts` - Fallback subprocess mode for MLX ops
+- `python/mlx_daemon.py` - Long-running process that keeps models loaded in memory
+- `python/mlx_runner.py` - CLI for search, download, list, remove, infer, info
+- `commands/` - Slash commands (/mlx search, download, models, run, info, status)
 
 ## Testing
 
 ```bash
-# Run all TypeScript tests (44 tests)
+# Run all TypeScript tests (53 tests)
 npm test
 
-# Run all Python tests (11 tests)
+# Run all Python tests (21 tests)
 python3 -m unittest python/test_mlx_runner.py
 
 # Manual testing - Python runner directly

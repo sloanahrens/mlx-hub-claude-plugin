@@ -23,6 +23,10 @@ import {
   runInferenceStreaming,
   StreamToken,
 } from './python-runner.js';
+import { daemonManager } from './daemon-runner.js';
+
+// Track whether to use daemon mode (can be disabled on failure)
+let useDaemonMode = true;
 
 // Create MCP Server
 const server = new Server(
@@ -108,6 +112,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             model_id: { type: 'string', minLength: 1, description: 'Model ID (e.g., mlx-community/Llama-3.2-3B-Instruct-4bit)' },
           },
           required: ['model_id'],
+        },
+      },
+      {
+        name: 'mlx_status',
+        description: 'Get status of the MLX inference daemon. Shows if a model is currently loaded in memory for fast inference.',
+        inputSchema: {
+          type: 'object',
+          properties: {},
         },
       },
     ],
@@ -222,6 +234,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === 'mlx_infer') {
       const params = InferInputSchema.parse(args);
 
+      // Try daemon mode first (keeps model loaded for fast inference)
+      if (useDaemonMode) {
+        try {
+          const result = await daemonManager.infer({
+            model_id: params.model_id,
+            prompt: params.prompt,
+            system_prompt: params.system_prompt,
+            max_tokens: params.max_tokens,
+            temperature: params.temperature,
+          });
+
+          if (!result.success) {
+            return {
+              content: [{ type: 'text', text: `Error: ${result.error}` }],
+              isError: true,
+            };
+          }
+
+          return {
+            content: [{
+              type: 'text',
+              text: `${result.output}\n\n---\n${result.tokens_generated} tokens @ ${result.tokens_per_sec} tok/s (daemon mode)`
+            }],
+          };
+        } catch (daemonError) {
+          // Daemon failed, fall back to subprocess mode
+          console.error('Daemon mode failed, falling back to subprocess:', daemonError);
+          useDaemonMode = false;
+        }
+      }
+
+      // Fallback: subprocess mode (cold start each time)
       let output = '';
       const result = await runInferenceStreaming(
         params.model_id,
@@ -290,6 +334,39 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return {
         content: [{ type: 'text', text: lines.join('\n') }],
       };
+    }
+
+    if (name === 'mlx_status') {
+      try {
+        if (!useDaemonMode) {
+          return {
+            content: [{ type: 'text', text: 'Daemon mode: disabled (using subprocess fallback)\nNo model loaded in memory.' }],
+          };
+        }
+
+        if (!daemonManager.isRunning()) {
+          return {
+            content: [{ type: 'text', text: 'Daemon mode: enabled but not started\nDaemon will start on first inference request.' }],
+          };
+        }
+
+        const status = await daemonManager.getStatus();
+        const lines = [
+          'Daemon mode: active',
+          status.loaded_model
+            ? `Loaded model: ${status.loaded_model}`
+            : 'No model currently loaded',
+        ];
+
+        return {
+          content: [{ type: 'text', text: lines.join('\n') }],
+        };
+      } catch (error) {
+        return {
+          content: [{ type: 'text', text: `Daemon status check failed: ${error}` }],
+          isError: true,
+        };
+      }
     }
 
     return {
