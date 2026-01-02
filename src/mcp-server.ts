@@ -90,17 +90,29 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'mlx_infer',
-        description: 'Run inference on a local MLX model. Streams tokens as they are generated.',
+        description: 'Run inference on a local MLX model. Supports single prompts or multi-turn conversations. Uses persistent daemon for fast inference.',
         inputSchema: {
           type: 'object',
           properties: {
             model_id: { type: 'string', minLength: 1, description: 'Model ID (must be downloaded first)' },
-            prompt: { type: 'string', minLength: 1, description: 'Input prompt for the model' },
-            system_prompt: { type: 'string', description: 'System prompt for chat models (optional)' },
+            prompt: { type: 'string', minLength: 1, description: 'Input prompt for single-turn inference (use prompt OR messages, not both)' },
+            messages: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  role: { type: 'string', enum: ['system', 'user', 'assistant'] },
+                  content: { type: 'string' },
+                },
+                required: ['role', 'content'],
+              },
+              description: 'Chat messages array for multi-turn conversations (use prompt OR messages, not both)',
+            },
+            system_prompt: { type: 'string', description: 'System prompt for chat models (optional, only used with prompt)' },
             max_tokens: { type: 'number', minimum: 1, maximum: 4096, default: 256, description: 'Maximum tokens to generate' },
             temperature: { type: 'number', minimum: 0, maximum: 2, default: 0.7, description: 'Sampling temperature' },
           },
-          required: ['model_id', 'prompt'],
+          required: ['model_id'],
         },
       },
       {
@@ -234,16 +246,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === 'mlx_infer') {
       const params = InferInputSchema.parse(args);
 
+      // Determine if using messages mode or prompt mode
+      const useMessagesMode = params.messages !== undefined && params.messages.length > 0;
+
       // Try daemon mode first (keeps model loaded for fast inference)
       if (useDaemonMode) {
         try {
-          const result = await daemonManager.infer({
-            model_id: params.model_id,
-            prompt: params.prompt,
-            system_prompt: params.system_prompt,
-            max_tokens: params.max_tokens,
-            temperature: params.temperature,
-          });
+          let result;
+
+          if (useMessagesMode) {
+            // Multi-turn conversation mode
+            result = await daemonManager.inferMessages({
+              model_id: params.model_id,
+              messages: params.messages!,
+              max_tokens: params.max_tokens,
+              temperature: params.temperature,
+            });
+          } else {
+            // Single prompt mode
+            result = await daemonManager.infer({
+              model_id: params.model_id,
+              prompt: params.prompt!,
+              system_prompt: params.system_prompt,
+              max_tokens: params.max_tokens,
+              temperature: params.temperature,
+            });
+          }
 
           if (!result.success) {
             return {
@@ -252,10 +280,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             };
           }
 
+          const modeLabel = useMessagesMode ? 'chat' : 'prompt';
           return {
             content: [{
               type: 'text',
-              text: `${result.output}\n\n---\n${result.tokens_generated} tokens @ ${result.tokens_per_sec} tok/s (daemon mode)`
+              text: `${result.output}\n\n---\n${result.tokens_generated} tokens @ ${result.tokens_per_sec} tok/s (daemon, ${modeLabel})`
             }],
           };
         } catch (daemonError) {
@@ -266,10 +295,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // Fallback: subprocess mode (cold start each time)
+      // Note: subprocess mode only supports single prompts for now
+      if (useMessagesMode) {
+        return {
+          content: [{ type: 'text', text: 'Error: messages mode requires daemon (subprocess fallback does not support multi-turn)' }],
+          isError: true,
+        };
+      }
+
       let output = '';
       const result = await runInferenceStreaming(
         params.model_id,
-        params.prompt,
+        params.prompt!,
         params.max_tokens,
         params.temperature,
         (token: StreamToken) => {

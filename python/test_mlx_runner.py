@@ -554,6 +554,48 @@ class TestMLXDaemon(unittest.TestCase):
         self.assertEqual(result["type"], "error")
         self.assertIn("not found locally", result["error"].lower())
 
+    def test_daemon_infer_messages_requires_model_and_messages(self):
+        from mlx_daemon import MLXDaemon
+        from io import StringIO
+
+        captured = StringIO()
+        sys.stdout = captured
+
+        daemon = MLXDaemon()
+        daemon.cmd_infer_messages({})  # Missing model_id and messages
+
+        sys.stdout = sys.__stdout__
+        output = captured.getvalue()
+        result = json.loads(output.strip())
+        self.assertEqual(result["type"], "error")
+        self.assertIn("model_id and messages are required", result["error"])
+
+    @patch('huggingface_hub.scan_cache_dir')
+    def test_daemon_infer_messages_model_not_found(self, mock_scan):
+        from mlx_daemon import MLXDaemon
+        from io import StringIO
+
+        mock_cache = MagicMock()
+        mock_cache.repos = []
+        mock_scan.return_value = mock_cache
+
+        captured = StringIO()
+        sys.stdout = captured
+
+        daemon = MLXDaemon()
+        daemon.cmd_infer_messages({
+            "model_id": "nonexistent/model",
+            "messages": [
+                {"role": "user", "content": "Hello"}
+            ]
+        })
+
+        sys.stdout = sys.__stdout__
+        output = captured.getvalue()
+        result = json.loads(output.strip())
+        self.assertEqual(result["type"], "error")
+        self.assertIn("not found locally", result["error"].lower())
+
 
 if __name__ == "__main__":
     unittest.main()

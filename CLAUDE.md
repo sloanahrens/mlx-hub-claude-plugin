@@ -22,10 +22,10 @@ pip install -r python/requirements.txt  # Install Python deps
 ## Testing
 
 ```bash
-# Run all TypeScript tests (53 tests)
+# Run all TypeScript tests (59 tests)
 npm test
 
-# Run all Python tests (21 tests)
+# Run all Python tests (23 tests)
 python3 -m unittest python/test_mlx_runner.py
 
 # Manual testing - Python runner directly

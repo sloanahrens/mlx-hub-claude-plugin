@@ -157,6 +157,67 @@ describe('InferInputSchema', () => {
     });
     expect(result.system_prompt).toBeUndefined();
   });
+
+  it('accepts messages array instead of prompt', () => {
+    const result = InferInputSchema.parse({
+      model_id: 'test/model',
+      messages: [
+        { role: 'system', content: 'You are helpful.' },
+        { role: 'user', content: 'Hello!' },
+      ],
+    });
+    expect(result.messages).toHaveLength(2);
+    expect(result.messages![0].role).toBe('system');
+    expect(result.prompt).toBeUndefined();
+  });
+
+  it('accepts multi-turn conversation', () => {
+    const result = InferInputSchema.parse({
+      model_id: 'test/model',
+      messages: [
+        { role: 'user', content: 'What is 2+2?' },
+        { role: 'assistant', content: '4' },
+        { role: 'user', content: 'Multiply that by 10' },
+      ],
+    });
+    expect(result.messages).toHaveLength(3);
+  });
+
+  it('rejects empty messages array', () => {
+    expect(() =>
+      InferInputSchema.parse({
+        model_id: 'test/model',
+        messages: [],
+      })
+    ).toThrow();
+  });
+
+  it('rejects both prompt and messages', () => {
+    expect(() =>
+      InferInputSchema.parse({
+        model_id: 'test/model',
+        prompt: 'Hello',
+        messages: [{ role: 'user', content: 'Hello' }],
+      })
+    ).toThrow();
+  });
+
+  it('rejects neither prompt nor messages', () => {
+    expect(() =>
+      InferInputSchema.parse({
+        model_id: 'test/model',
+      })
+    ).toThrow();
+  });
+
+  it('validates message role enum', () => {
+    expect(() =>
+      InferInputSchema.parse({
+        model_id: 'test/model',
+        messages: [{ role: 'invalid', content: 'Hello' }],
+      })
+    ).toThrow();
+  });
 });
 
 describe('InfoInputSchema', () => {
