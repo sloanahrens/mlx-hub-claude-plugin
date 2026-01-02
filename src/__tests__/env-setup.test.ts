@@ -1,8 +1,8 @@
 // src/__tests__/env-setup.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { homedir } from 'os';
-import { join } from 'path';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs';
+import { dirname, join } from 'path';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { MLX_HUB_DIR, VENV_DIR, PYTHON_READY_FILE, getVenvPythonPath, getRequirementsHash, checkUvInstalled, MarkerData, readMarkerFile, writeMarkerFile, ensurePythonEnv, getPythonPath, resetPythonPathCache } from '../env-setup.js';
 
@@ -149,9 +149,11 @@ describe('ensurePythonEnv', () => {
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
+    // Clean up venv directory created by tests (getVenvPythonPath points to real location)
+    rmSync(VENV_DIR, { recursive: true, force: true });
   });
 
-  it('returns cached path when marker is valid and hash matches', async () => {
+  it('returns cached path when marker is valid, hash matches, AND venv exists', async () => {
     // Setup: create a marker file with matching requirements hash
     const currentHash = getRequirementsHash();
     const markerData: MarkerData = {
@@ -162,13 +164,54 @@ describe('ensurePythonEnv', () => {
     const testMarkerPath = join(tempDir, '.python-ready');
     writeFileSync(testMarkerPath, JSON.stringify(markerData));
 
+    // Setup: create the venv python binary that ensurePythonEnv checks for
+    const pythonPath = getVenvPythonPath();
+    mkdirSync(dirname(pythonPath), { recursive: true });
+    writeFileSync(pythonPath, '#!/usr/bin/env python3\n');
+
     // Call with custom marker path for testing
     const result = await ensurePythonEnv(testMarkerPath);
 
     // Should return venv python path without calling uv commands
-    expect(result).toBe(getVenvPythonPath());
+    expect(result).toBe(pythonPath);
     // execFileSync should NOT be called (fast path)
     expect(execFileSync).not.toHaveBeenCalled();
+  });
+
+  it('recreates venv when marker exists but venv is missing', async () => {
+    // Setup: create a marker file with matching requirements hash BUT no venv
+    const currentHash = getRequirementsHash();
+    const markerData: MarkerData = {
+      created: '2025-01-02T10:00:00.000Z',
+      uv_version: '0.5.11',
+      requirements_hash: currentHash,
+    };
+    const testMarkerPath = join(tempDir, '.python-ready');
+    writeFileSync(testMarkerPath, JSON.stringify(markerData));
+
+    // Setup: mock uv commands to succeed (since venv doesn't exist, it should try to create it)
+    vi.mocked(execFileSync).mockImplementation((cmd, args, options) => {
+      if (cmd === 'uv' && args?.[0] === '--version') {
+        const result = 'uv 0.5.11\n';
+        if (options && typeof options === 'object' && 'encoding' in options) {
+          return result;
+        }
+        return Buffer.from(result);
+      }
+      return Buffer.from('');
+    });
+
+    // Call with custom marker path for testing
+    const result = await ensurePythonEnv(testMarkerPath);
+
+    // Should return venv python path
+    expect(result).toBe(getVenvPythonPath());
+    // Should have called uv venv (because venv was missing)
+    expect(execFileSync).toHaveBeenCalledWith(
+      'uv',
+      ['venv', expect.any(String)],
+      expect.anything()
+    );
   });
 
   it('throws when uv is not installed', async () => {

@@ -96,11 +96,12 @@ export function writeMarkerFile(path: string, data: MarkerData): void {
  * @throws Error if uv is not installed
  */
 export async function ensurePythonEnv(markerPath: string = PYTHON_READY_FILE): Promise<string> {
-  // 1. Check marker file - if valid and hash matches, return fast
+  // 1. Check marker file - if valid, hash matches, AND venv exists, return fast
   const marker = readMarkerFile(markerPath);
   const currentHash = getRequirementsHash();
-  if (marker && marker.requirements_hash === currentHash) {
-    return getVenvPythonPath();
+  const pythonPath = getVenvPythonPath();
+  if (marker && marker.requirements_hash === currentHash && existsSync(pythonPath)) {
+    return pythonPath;
   }
 
   // 2. Check uv is installed
