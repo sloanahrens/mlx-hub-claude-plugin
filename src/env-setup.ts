@@ -83,3 +83,50 @@ export function writeMarkerFile(path: string, data: MarkerData): void {
   }
   writeFileSync(path, JSON.stringify(data));
 }
+
+/**
+ * Ensure Python virtual environment is set up and ready for MLX operations.
+ * Uses a marker file to cache setup state and avoid re-running on every call.
+ *
+ * @param markerPath - Optional custom marker path (for testing)
+ * @returns Path to the Python binary in the venv
+ * @throws Error if uv is not installed
+ */
+export async function ensurePythonEnv(markerPath: string = PYTHON_READY_FILE): Promise<string> {
+  // 1. Check marker file - if valid and hash matches, return fast
+  const marker = readMarkerFile(markerPath);
+  const currentHash = getRequirementsHash();
+  if (marker && marker.requirements_hash === currentHash) {
+    return getVenvPythonPath();
+  }
+
+  // 2. Check uv is installed
+  if (!checkUvInstalled()) {
+    throw new Error(
+      "MLX Hub requires 'uv' for Python environment management.\n\n" +
+      'Install with:\n' +
+      '  curl -LsSf https://astral.sh/uv/install.sh | sh\n' +
+      '  brew install uv\n\n' +
+      'Then restart Claude Code.'
+    );
+  }
+
+  // 3. Create venv
+  execFileSync('uv', ['venv', VENV_DIR], { stdio: 'pipe' });
+
+  // 4. Install dependencies
+  execFileSync('uv', ['pip', 'install', '-r', REQUIREMENTS_PATH, '--python', getVenvPythonPath()], { stdio: 'pipe' });
+
+  // 5. Get uv version
+  const versionOutput = execFileSync('uv', ['--version'], { encoding: 'utf-8' });
+  const uvVersion = versionOutput.trim().replace('uv ', '');
+
+  // 6. Write marker file
+  writeMarkerFile(markerPath, {
+    created: new Date().toISOString(),
+    uv_version: uvVersion,
+    requirements_hash: currentHash,
+  });
+
+  return getVenvPythonPath();
+}

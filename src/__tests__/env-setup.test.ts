@@ -4,7 +4,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
-import { MLX_HUB_DIR, VENV_DIR, PYTHON_READY_FILE, getVenvPythonPath, getRequirementsHash, checkUvInstalled, MarkerData, readMarkerFile, writeMarkerFile } from '../env-setup.js';
+import { MLX_HUB_DIR, VENV_DIR, PYTHON_READY_FILE, getVenvPythonPath, getRequirementsHash, checkUvInstalled, MarkerData, readMarkerFile, writeMarkerFile, ensurePythonEnv } from '../env-setup.js';
 
 // Mock child_process
 vi.mock('child_process', async () => {
@@ -136,5 +136,143 @@ describe('writeMarkerFile', () => {
     expect(existsSync(nestedPath)).toBe(true);
     const content = readFileSync(nestedPath, 'utf-8');
     expect(JSON.parse(content)).toEqual(markerData);
+  });
+});
+
+describe('ensurePythonEnv', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    tempDir = mkdtempSync(join(tmpdir(), 'mlx-hub-test-'));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('returns cached path when marker is valid and hash matches', async () => {
+    // Setup: create a marker file with matching requirements hash
+    const currentHash = getRequirementsHash();
+    const markerData: MarkerData = {
+      created: '2025-01-02T10:00:00.000Z',
+      uv_version: '0.5.11',
+      requirements_hash: currentHash,
+    };
+    const testMarkerPath = join(tempDir, '.python-ready');
+    writeFileSync(testMarkerPath, JSON.stringify(markerData));
+
+    // Call with custom marker path for testing
+    const result = await ensurePythonEnv(testMarkerPath);
+
+    // Should return venv python path without calling uv commands
+    expect(result).toBe(getVenvPythonPath());
+    // execFileSync should NOT be called (fast path)
+    expect(execFileSync).not.toHaveBeenCalled();
+  });
+
+  it('throws when uv is not installed', async () => {
+    // Setup: mock uv not found
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw new Error('command not found');
+    });
+
+    const testMarkerPath = join(tempDir, '.python-ready');
+
+    // Should throw with installation instructions
+    await expect(ensurePythonEnv(testMarkerPath)).rejects.toThrow(
+      /uv.*for Python environment management/
+    );
+    await expect(ensurePythonEnv(testMarkerPath)).rejects.toThrow(
+      /curl -LsSf https:\/\/astral\.sh\/uv\/install\.sh/
+    );
+  });
+
+  it('creates venv and installs deps when marker is missing', async () => {
+    // Setup: mock uv commands to succeed
+    vi.mocked(execFileSync).mockImplementation((cmd, args, options) => {
+      if (cmd === 'uv' && args?.[0] === '--version') {
+        // Return string when encoding is specified, Buffer otherwise
+        const result = 'uv 0.5.11\n';
+        if (options && typeof options === 'object' && 'encoding' in options) {
+          return result;
+        }
+        return Buffer.from(result);
+      }
+      if (cmd === 'uv' && args?.[0] === 'venv') {
+        return Buffer.from('');
+      }
+      if (cmd === 'uv' && args?.[0] === 'pip') {
+        return Buffer.from('');
+      }
+      return Buffer.from('');
+    });
+
+    const testMarkerPath = join(tempDir, '.python-ready');
+
+    const result = await ensurePythonEnv(testMarkerPath);
+
+    // Should return venv python path
+    expect(result).toBe(getVenvPythonPath());
+
+    // Should have called uv venv
+    expect(execFileSync).toHaveBeenCalledWith(
+      'uv',
+      ['venv', VENV_DIR],
+      expect.any(Object)
+    );
+
+    // Should have called uv pip install
+    expect(execFileSync).toHaveBeenCalledWith(
+      'uv',
+      expect.arrayContaining(['pip', 'install', '-r']),
+      expect.any(Object)
+    );
+
+    // Should have written marker file
+    expect(existsSync(testMarkerPath)).toBe(true);
+    const savedMarker = JSON.parse(readFileSync(testMarkerPath, 'utf-8')) as MarkerData;
+    expect(savedMarker.uv_version).toBe('0.5.11');
+    expect(savedMarker.requirements_hash).toBe(getRequirementsHash());
+  });
+
+  it('recreates venv when requirements hash changes', async () => {
+    // Setup: create a marker file with OLD/different hash
+    const markerData: MarkerData = {
+      created: '2025-01-01T10:00:00.000Z',
+      uv_version: '0.5.10',
+      requirements_hash: 'old-hash-that-does-not-match',
+    };
+    const testMarkerPath = join(tempDir, '.python-ready');
+    writeFileSync(testMarkerPath, JSON.stringify(markerData));
+
+    // Mock uv commands to succeed
+    vi.mocked(execFileSync).mockImplementation((cmd, args, options) => {
+      if (cmd === 'uv' && args?.[0] === '--version') {
+        // Return string when encoding is specified, Buffer otherwise
+        const result = 'uv 0.5.11\n';
+        if (options && typeof options === 'object' && 'encoding' in options) {
+          return result;
+        }
+        return Buffer.from(result);
+      }
+      return Buffer.from('');
+    });
+
+    const result = await ensurePythonEnv(testMarkerPath);
+
+    // Should have recreated venv because hash changed
+    expect(execFileSync).toHaveBeenCalledWith(
+      'uv',
+      ['venv', VENV_DIR],
+      expect.any(Object)
+    );
+
+    // Should have updated marker file with new hash
+    const savedMarker = JSON.parse(readFileSync(testMarkerPath, 'utf-8')) as MarkerData;
+    expect(savedMarker.requirements_hash).toBe(getRequirementsHash());
+    expect(savedMarker.requirements_hash).not.toBe('old-hash-that-does-not-match');
+
+    expect(result).toBe(getVenvPythonPath());
   });
 });
