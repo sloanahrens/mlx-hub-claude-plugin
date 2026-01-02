@@ -10,6 +10,7 @@ import { spawn } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { getSocketPath, getPidPath, getDaemonDir } from './socket-utils.js';
+import { getPythonPath } from './env-setup.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DAEMON_SCRIPT = join(__dirname, '..', 'python', 'mlx_daemon.py');
@@ -187,9 +188,12 @@ export class DaemonClient {
       fs.mkdirSync(daemonDir, { recursive: true });
     }
 
+    // Get Python path from managed venv
+    const pythonPath = await getPythonPath();
+
     // Spawn detached daemon process
     const daemon = spawn(
-      'python3',
+      pythonPath,
       [DAEMON_SCRIPT, '--model', this.modelId, '--socket', socketPath],
       {
         detached: true,

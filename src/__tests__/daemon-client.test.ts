@@ -34,6 +34,11 @@ vi.mock('child_process', () => ({
   })),
 }));
 
+// Mock env-setup to provide getPythonPath
+vi.mock('../env-setup.js', () => ({
+  getPythonPath: vi.fn().mockResolvedValue('/mocked/venv/bin/python3'),
+}));
+
 // Mock crypto
 vi.mock('crypto', () => ({
   randomUUID: vi.fn(() => 'test-uuid-1234'),
@@ -221,6 +226,41 @@ describe('DaemonClient', () => {
 
       expect(params.messages).toHaveLength(2);
       expect(params.messages[0].role).toBe('system');
+    });
+  });
+
+  describe('startDaemon', () => {
+    it('uses getPythonPath from env-setup', async () => {
+      const fs = await import('fs');
+      const childProcess = await import('child_process');
+      const envSetup = await import('../env-setup.js');
+
+      // Socket doesn't exist initially, then appears after daemon starts
+      let socketCreated = false;
+      vi.mocked(fs.existsSync).mockImplementation((p: any) => {
+        if (p.toString().endsWith('.sock')) {
+          const result = socketCreated;
+          socketCreated = true; // Next check will succeed
+          return result;
+        }
+        return true;
+      });
+      vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
+
+      const { DaemonClient } = await import('../daemon-client.js');
+      const client = new DaemonClient('test-model');
+
+      await client.startDaemon();
+
+      // Verify getPythonPath was called
+      expect(envSetup.getPythonPath).toHaveBeenCalled();
+
+      // Verify spawn was called with the mocked Python path
+      expect(childProcess.spawn).toHaveBeenCalledWith(
+        '/mocked/venv/bin/python3',
+        expect.arrayContaining(['--model', 'test-model']),
+        expect.objectContaining({ detached: true })
+      );
     });
   });
 
