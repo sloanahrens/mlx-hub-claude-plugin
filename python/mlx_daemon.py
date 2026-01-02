@@ -545,34 +545,19 @@ class MLXDaemon:
 
 def main():
     """CLI entry point."""
-    parser = argparse.ArgumentParser(description="MLX Daemon - Unix socket server")
-    parser.add_argument(
-        "model_id",
-        help="Model ID to serve (e.g., mlx-community/Llama-3.2-1B-Instruct-4bit)",
-    )
-    parser.add_argument(
-        "--socket",
-        required=True,
-        help="Path to Unix domain socket",
-    )
-    parser.add_argument(
-        "--idle-timeout",
-        type=int,
-        default=1800,
-        help="Seconds of inactivity before auto-shutdown (default: 1800)",
-    )
-
+    parser = argparse.ArgumentParser(description='MLX Daemon - Socket server for model inference')
+    parser.add_argument('--model', required=True, help='Model ID to serve')
+    parser.add_argument('--socket', required=True, help='Unix socket path')
+    parser.add_argument('--idle-timeout', type=int, default=1800, help='Idle timeout in seconds')
     args = parser.parse_args()
 
     daemon = MLXDaemon(
-        model_id=args.model_id,
+        model_id=args.model,
         socket_path=args.socket,
         idle_timeout=args.idle_timeout,
     )
 
-    # Handle SIGTERM gracefully
     def signal_handler(signum, frame):
-        print("Received signal, shutting down...", file=sys.stderr)
         daemon.stop()
 
     signal.signal(signal.SIGTERM, signal_handler)
@@ -581,7 +566,7 @@ def main():
     try:
         daemon.start()
     except Exception as e:
-        print(json.dumps({"type": "fatal", "error": str(e)}), flush=True)
+        print(json.dumps({"type": "fatal", "error": str(e)}), file=sys.stderr)
         sys.exit(1)
 
 
