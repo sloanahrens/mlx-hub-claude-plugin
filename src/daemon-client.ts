@@ -190,7 +190,7 @@ export class DaemonClient {
     // Spawn detached daemon process
     const daemon = spawn(
       'python3',
-      [DAEMON_SCRIPT, this.modelId, '--socket', socketPath],
+      [DAEMON_SCRIPT, '--model', this.modelId, '--socket', socketPath],
       {
         detached: true,
         stdio: 'ignore',
