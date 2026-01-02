@@ -16,10 +16,41 @@ import {
   modelIdToSocketName,
 } from '../socket-utils.js';
 
+/** PID that is virtually guaranteed not to exist on any system */
+const INVALID_PID = 999999999;
+
+/**
+ * Ensures the daemon directory exists.
+ */
+function ensureDaemonDir(): void {
+  const daemonDir = getDaemonDir();
+  if (!fs.existsSync(daemonDir)) {
+    fs.mkdirSync(daemonDir, { recursive: true });
+  }
+}
+
+/**
+ * Creates test daemon files (socket and optionally pid).
+ */
+function createTestDaemonFiles(
+  socketPath: string,
+  pidPath?: string,
+  pidContent?: string
+): void {
+  ensureDaemonDir();
+  fs.writeFileSync(socketPath, '');
+  if (pidPath !== undefined && pidContent !== undefined) {
+    fs.writeFileSync(pidPath, pidContent);
+  }
+}
+
 describe('Integration: DaemonClient', () => {
   const testModelId = 'mlx-community/test-model';
 
   afterEach(async () => {
+    // Restore all mocks
+    vi.restoreAllMocks();
+
     // Cleanup any test artifacts
     const socketPath = getSocketPath(testModelId);
     const pidPath = getPidPath(testModelId);
@@ -104,19 +135,10 @@ describe('Integration: DaemonClient', () => {
       const client = new DaemonClient(testModelId);
       const socketPath = client.getSocketPath();
 
-      // Ensure daemon directory exists
-      const daemonDir = getDaemonDir();
-      if (!fs.existsSync(daemonDir)) {
-        fs.mkdirSync(daemonDir, { recursive: true });
-      }
-
       // Create socket file but no pid
-      fs.writeFileSync(socketPath, '');
+      createTestDaemonFiles(socketPath);
 
       expect(client.isDaemonRunning()).toBe(false);
-
-      // Cleanup
-      fs.unlinkSync(socketPath);
     });
 
     it('returns false when socket and pid exist but process is dead', () => {
@@ -124,21 +146,10 @@ describe('Integration: DaemonClient', () => {
       const socketPath = client.getSocketPath();
       const pidPath = client.getPidPath();
 
-      // Ensure daemon directory exists
-      const daemonDir = getDaemonDir();
-      if (!fs.existsSync(daemonDir)) {
-        fs.mkdirSync(daemonDir, { recursive: true });
-      }
-
       // Create socket and pid files with invalid pid
-      fs.writeFileSync(socketPath, '');
-      fs.writeFileSync(pidPath, '999999999'); // Very unlikely to be a real process
+      createTestDaemonFiles(socketPath, pidPath, String(INVALID_PID));
 
       expect(client.isDaemonRunning()).toBe(false);
-
-      // Cleanup
-      fs.unlinkSync(socketPath);
-      fs.unlinkSync(pidPath);
     });
 
     it('returns false when pid file contains invalid data', () => {
@@ -146,21 +157,10 @@ describe('Integration: DaemonClient', () => {
       const socketPath = client.getSocketPath();
       const pidPath = client.getPidPath();
 
-      // Ensure daemon directory exists
-      const daemonDir = getDaemonDir();
-      if (!fs.existsSync(daemonDir)) {
-        fs.mkdirSync(daemonDir, { recursive: true });
-      }
-
       // Create socket and pid files with non-numeric content
-      fs.writeFileSync(socketPath, '');
-      fs.writeFileSync(pidPath, 'not-a-number');
+      createTestDaemonFiles(socketPath, pidPath, 'not-a-number');
 
       expect(client.isDaemonRunning()).toBe(false);
-
-      // Cleanup
-      fs.unlinkSync(socketPath);
-      fs.unlinkSync(pidPath);
     });
   });
 
@@ -170,13 +170,11 @@ describe('Integration: DaemonClient', () => {
       const client = new DaemonClient('nonexistent/test-model-for-connect');
 
       // Mock startDaemon to fail (since we don't have the actual Python script)
-      const startDaemonSpy = vi
-        .spyOn(client as any, 'startDaemon')
-        .mockRejectedValue(new Error('Daemon failed to start within 10000ms'));
+      vi.spyOn(client as any, 'startDaemon').mockRejectedValue(
+        new Error('Daemon failed to start within 10000ms')
+      );
 
       await expect(client.connect()).rejects.toThrow();
-
-      startDaemonSpy.mockRestore();
     });
 
     it('handles socket connection errors gracefully', async () => {
@@ -184,23 +182,13 @@ describe('Integration: DaemonClient', () => {
       const socketPath = client.getSocketPath();
       const pidPath = client.getPidPath();
 
-      // Ensure daemon directory exists
-      const daemonDir = getDaemonDir();
-      if (!fs.existsSync(daemonDir)) {
-        fs.mkdirSync(daemonDir, { recursive: true });
-      }
-
       // Create fake socket and pid to bypass auto-start
-      fs.writeFileSync(socketPath, '');
-      fs.writeFileSync(pidPath, String(process.pid)); // Use our own pid so it "exists"
+      // Use our own pid so it "exists"
+      createTestDaemonFiles(socketPath, pidPath, String(process.pid));
 
       // isDaemonRunning will return true but connection will fail
       // because the socket file isn't a real Unix socket
       await expect(client.connect()).rejects.toThrow();
-
-      // Cleanup
-      fs.unlinkSync(socketPath);
-      fs.unlinkSync(pidPath);
     });
   });
 
@@ -215,12 +203,10 @@ describe('Integration: DaemonClient', () => {
     it('can be called multiple times safely', async () => {
       const client = new DaemonClient(testModelId);
 
+      // Test passes if no error is thrown
       await client.close();
       await client.close();
       await client.close();
-
-      // No error should be thrown
-      expect(true).toBe(true);
     });
   });
 
@@ -239,8 +225,6 @@ describe('Integration: DaemonClient', () => {
       await expect(client.infer({ prompt: 'test' })).rejects.toThrow(
         'Daemon failed to start'
       );
-
-      vi.restoreAllMocks();
     });
   });
 
@@ -249,15 +233,13 @@ describe('Integration: DaemonClient', () => {
       const client = new DaemonClient('nonexistent/model');
 
       // Mock connect to reject
-      const connectSpy = vi
-        .spyOn(client, 'connect')
-        .mockRejectedValue(new Error('Connection failed'));
+      vi.spyOn(client, 'connect').mockRejectedValue(
+        new Error('Connection failed')
+      );
 
       const result = await client.ping();
 
       expect(result).toBe(false);
-
-      connectSpy.mockRestore();
     });
   });
 });
