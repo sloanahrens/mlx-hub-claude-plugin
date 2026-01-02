@@ -11,7 +11,7 @@ help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Setup:"
-	@echo "  install      Install Node and Python dependencies"
+	@echo "  install      Build TypeScript (Python auto-configured on first use)"
 	@echo ""
 	@echo "Development:"
 	@echo "  build        Compile TypeScript to dist/"
@@ -20,7 +20,7 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  test         Run all tests (TypeScript + Python)"
-	@echo "  test-ts      Run TypeScript tests only (117 tests)"
+	@echo "  test-ts      Run TypeScript tests only (136 tests)"
 	@echo "  test-py      Run Python tests only (15 tests)"
 	@echo ""
 	@echo "Maintenance:"
@@ -50,7 +50,7 @@ typecheck:
 # Run all tests
 test: test-ts test-py
 	@echo ""
-	@echo "All tests passed! (117 TS + 15 Python = 132 total)"
+	@echo "All tests passed! (136 TS + 15 Python = 151 total)"
 
 # Run TypeScript tests only
 test-ts:
@@ -85,6 +85,6 @@ check-deps:
 	@echo "All dependencies OK"
 
 # Full check: install, build, and test
-all: install build test
+all: install test
 	@echo ""
 	@echo "All checks passed!"
