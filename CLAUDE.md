@@ -18,7 +18,7 @@ pip install -r python/requirements.txt  # Install Python deps
 - `src/python-runner.ts` - Fallback subprocess mode for MLX ops (non-inference)
 - `python/mlx_daemon.py` - Shared daemon process that keeps models loaded in memory
 - `python/mlx_runner.py` - CLI for search, download, list, remove, infer, info
-- `commands/` - Slash commands (/mlx search, download, models, run, info, status, daemon)
+- `commands/` - Slash commands (/mlx-hub:search, /mlx-hub:download, /mlx-hub:models, /mlx-hub:run, /mlx-hub:info, /mlx-hub:status, /mlx-hub:daemon)
 
 ## Shared Daemon Architecture
 
@@ -32,10 +32,10 @@ The daemon uses Unix sockets for cross-session model sharing:
 ### Daemon Commands
 
 ```bash
-/mlx daemon status       # List running daemons with memory usage
-/mlx daemon stop <model> # Stop a specific daemon
-/mlx daemon stop-all     # Stop all running daemons
-/mlx daemon preload <model> # Pre-load a model for faster first inference
+/mlx-hub:daemon status       # List running daemons with memory usage
+/mlx-hub:daemon stop <model> # Stop a specific daemon
+/mlx-hub:daemon stop-all     # Stop all running daemons
+/mlx-hub:daemon preload <model> # Pre-load a model for faster first inference
 ```
 
 ### How It Works

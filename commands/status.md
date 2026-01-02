@@ -1,9 +1,8 @@
 ---
-name: mlx status
 description: Show MLX daemon status and loaded model info
 ---
 
-# /mlx status
+# /mlx-hub:status
 
 Check the status of the MLX inference daemon. Shows whether a model is currently loaded in memory for fast inference.
 

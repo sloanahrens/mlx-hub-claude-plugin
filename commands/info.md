@@ -2,7 +2,7 @@
 description: Get detailed information about an MLX model
 ---
 
-# /mlx info
+# /mlx-hub:info
 
 Get detailed information about a model from Hugging Face Hub.
 

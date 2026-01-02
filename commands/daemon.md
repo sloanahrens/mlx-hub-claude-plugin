@@ -1,9 +1,8 @@
 ---
-name: daemon
 description: Manage MLX daemons (status, stop, preload)
 ---
 
-# /mlx daemon
+# /mlx-hub:daemon
 
 Manage shared MLX model daemons. Each model runs its own daemon process that keeps the model loaded in memory for fast inference.
 

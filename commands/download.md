@@ -2,7 +2,7 @@
 description: Download an MLX model from Hugging Face Hub
 ---
 
-# /mlx download
+# /mlx-hub:download
 
 Download an MLX model to local cache.
 

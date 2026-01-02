@@ -2,7 +2,7 @@
 description: Search Hugging Face Hub for MLX-compatible models
 ---
 
-# /mlx search
+# /mlx-hub:search
 
 Search for MLX-compatible models on Hugging Face Hub.
 

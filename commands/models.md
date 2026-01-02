@@ -2,7 +2,7 @@
 description: List locally downloaded MLX models
 ---
 
-# /mlx models
+# /mlx-hub:models
 
 List all MLX models in local cache.
 

@@ -2,7 +2,7 @@
 description: Run inference on a local MLX model
 ---
 
-# /mlx run
+# /mlx-hub:run
 
 Run inference on a locally downloaded MLX model.
 
