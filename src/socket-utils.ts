@@ -5,6 +5,7 @@
 
 import { homedir } from 'os';
 import { join } from 'path';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 
 const MLX_COMMUNITY_PREFIX = 'mlx-community/';
 const DAEMON_DIR_NAME = '.mlx-hub';
@@ -75,4 +76,59 @@ export function getSocketPath(modelId: string): string {
 export function getPidPath(modelId: string): string {
   const socketName = modelIdToSocketName(modelId);
   return join(getDaemonDir(), `${socketName}.pid`);
+}
+
+/**
+ * Information about a running daemon.
+ */
+export interface RunningDaemon {
+  socketName: string;
+  socketPath: string;
+  pid: number;
+  isAlive: boolean;
+}
+
+/**
+ * List all running daemons by scanning the daemon directory.
+ * Checks both socket files and PID files, verifying processes are alive.
+ *
+ * @returns Array of running daemon info
+ */
+export function listRunningDaemons(): RunningDaemon[] {
+  const daemonDir = getDaemonDir();
+
+  if (!existsSync(daemonDir)) {
+    return [];
+  }
+
+  const files = readdirSync(daemonDir);
+  const socketFiles = files.filter((f) => f.endsWith('.sock'));
+  const daemons: RunningDaemon[] = [];
+
+  for (const sockFile of socketFiles) {
+    const socketName = sockFile.replace('.sock', '');
+    const socketPath = join(daemonDir, sockFile);
+    const pidPath = join(daemonDir, `${socketName}.pid`);
+
+    let pid = 0;
+    let isAlive = false;
+
+    if (existsSync(pidPath)) {
+      try {
+        pid = parseInt(readFileSync(pidPath, 'utf-8').trim(), 10);
+        if (!isNaN(pid)) {
+          // Send signal 0 to check if process exists
+          process.kill(pid, 0);
+          isAlive = true;
+        }
+      } catch {
+        // Process doesn't exist or permission denied
+        isAlive = false;
+      }
+    }
+
+    daemons.push({ socketName, socketPath, pid, isAlive });
+  }
+
+  return daemons;
 }

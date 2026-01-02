@@ -24,6 +24,7 @@ import {
   StreamToken,
 } from './python-runner.js';
 import { DaemonClient } from './daemon-client.js';
+import { listRunningDaemons } from './socket-utils.js';
 // Keep old daemon-runner as fallback for subprocess mode
 import { daemonManager } from './daemon-runner.js';
 
@@ -418,9 +419,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       try {
         const lines: string[] = [];
 
-        // Socket daemon status
+        // Socket daemon status - show actual running daemons
         if (useSocketDaemon) {
-          lines.push('Socket daemon: enabled (will start on first request)');
+          const runningDaemons = listRunningDaemons();
+          const aliveDaemons = runningDaemons.filter((d) => d.isAlive);
+
+          if (aliveDaemons.length === 0) {
+            lines.push('Socket daemons: none running (will start on first request)');
+          } else {
+            lines.push(`Socket daemons: ${aliveDaemons.length} running`);
+            for (const daemon of aliveDaemons) {
+              lines.push(`  - ${daemon.socketName} (pid ${daemon.pid})`);
+            }
+          }
+
+          // Report stale sockets (socket file exists but process is dead)
+          const staleDaemons = runningDaemons.filter((d) => !d.isAlive);
+          if (staleDaemons.length > 0) {
+            lines.push(`Stale sockets: ${staleDaemons.length} (cleanup needed)`);
+          }
         } else {
           lines.push('Socket daemon: disabled');
         }
@@ -428,7 +445,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Subprocess daemon status
         if (useSubprocessDaemon) {
           if (!daemonManager.isRunning()) {
-            lines.push('Subprocess daemon: enabled but not started');
+            lines.push('Subprocess daemon: not started');
           } else {
             const status = await daemonManager.getStatus();
             lines.push('Subprocess daemon: active');
