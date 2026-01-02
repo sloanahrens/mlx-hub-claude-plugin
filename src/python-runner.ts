@@ -5,6 +5,7 @@
 import { spawn } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { getPythonPath } from './env-setup.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PYTHON_SCRIPT = join(__dirname, '..', 'python', 'mlx_runner.py');
@@ -30,8 +31,9 @@ export async function runPythonCommand(
   command: string,
   args: string[]
 ): Promise<PythonResult> {
+  const pythonPath = await getPythonPath();
   return new Promise((resolve) => {
-    const proc = spawn('python3', [PYTHON_SCRIPT, command, ...args]);
+    const proc = spawn(pythonPath, [PYTHON_SCRIPT, command, ...args]);
 
     let stdout = '';
     let stderr = '';
@@ -88,6 +90,7 @@ export async function runInferenceStreaming(
   onToken: (token: StreamToken) => void,
   systemPrompt?: string
 ): Promise<PythonResult> {
+  const pythonPath = await getPythonPath();
   return new Promise((resolve) => {
     const args = [
       PYTHON_SCRIPT,
@@ -102,7 +105,7 @@ export async function runInferenceStreaming(
       args.push('--system-prompt', systemPrompt);
     }
 
-    const proc = spawn('python3', args);
+    const proc = spawn(pythonPath, args);
 
     let buffer = '';
     let lastError = '';

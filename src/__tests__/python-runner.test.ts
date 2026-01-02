@@ -6,6 +6,11 @@ vi.mock('child_process', () => ({
   spawn: vi.fn(),
 }));
 
+// Mock env-setup to provide a consistent Python path
+vi.mock('../env-setup.js', () => ({
+  getPythonPath: vi.fn().mockResolvedValue('/mocked/venv/bin/python3'),
+}));
+
 import { spawn } from 'child_process';
 import { runPythonCommand, runInferenceStreaming, StreamToken } from '../python-runner.js';
 
@@ -38,6 +43,9 @@ describe('runPythonCommand', () => {
 
     const resultPromise = runPythonCommand('list', []);
 
+    // Wait for getPythonPath() to resolve before emitting events
+    await new Promise((resolve) => setImmediate(resolve));
+
     // Simulate stdout data
     proc.stdout.emit('data', '{"models": [], "total_size_bytes": 0}\n');
 
@@ -54,6 +62,9 @@ describe('runPythonCommand', () => {
     vi.mocked(spawn).mockReturnValue(proc);
 
     const resultPromise = runPythonCommand('search', ['test']);
+
+    // Wait for getPythonPath() to resolve before emitting events
+    await new Promise((resolve) => setImmediate(resolve));
 
     // Simulate stderr
     proc.stderr.emit('data', 'Connection error');
@@ -72,6 +83,9 @@ describe('runPythonCommand', () => {
 
     const resultPromise = runPythonCommand('download', ['test/model']);
 
+    // Wait for getPythonPath() to resolve before emitting events
+    await new Promise((resolve) => setImmediate(resolve));
+
     // Simulate error JSON in stdout
     proc.stdout.emit('data', '{"error": "Model not found"}\n');
 
@@ -88,6 +102,9 @@ describe('runPythonCommand', () => {
 
     const resultPromise = runPythonCommand('infer', ['model']);
 
+    // Wait for getPythonPath() to resolve before emitting events
+    await new Promise((resolve) => setImmediate(resolve));
+
     // Simulate spawn error (e.g., python3 not found)
     handlers['error']?.(new Error('spawn python3 ENOENT'));
 
@@ -101,6 +118,9 @@ describe('runPythonCommand', () => {
     vi.mocked(spawn).mockReturnValue(proc);
 
     const resultPromise = runPythonCommand('download', ['mlx-community/test']);
+
+    // Wait for getPythonPath() to resolve before emitting events
+    await new Promise((resolve) => setImmediate(resolve));
 
     // Simulate progress output followed by final result
     proc.stdout.emit('data', '{"status": "downloading"}\n');
@@ -117,14 +137,18 @@ describe('runPythonCommand', () => {
     const { proc, handlers } = createMockProcess();
     vi.mocked(spawn).mockReturnValue(proc);
 
-    runPythonCommand('search', ['llama', '--limit', '5']);
+    const resultPromise = runPythonCommand('search', ['llama', '--limit', '5']);
+
+    // Wait a tick for getPythonPath() to resolve
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(spawn).toHaveBeenCalledWith(
-      'python3',
+      '/mocked/venv/bin/python3',
       expect.arrayContaining(['search', 'llama', '--limit', '5'])
     );
 
     handlers['close']?.(0);
+    await resultPromise;
   });
 });
 
@@ -145,6 +169,9 @@ describe('runInferenceStreaming', () => {
       0.7,
       (token) => tokens.push(token)
     );
+
+    // Wait for getPythonPath() to resolve before emitting events
+    await new Promise((resolve) => setImmediate(resolve));
 
     // Simulate streaming tokens
     proc.stdout.emit('data', '{"type": "status", "message": "Loading..."}\n');
@@ -176,6 +203,9 @@ describe('runInferenceStreaming', () => {
       (token) => tokens.push(token)
     );
 
+    // Wait for getPythonPath() to resolve before emitting events
+    await new Promise((resolve) => setImmediate(resolve));
+
     // Simulate data split across chunks
     proc.stdout.emit('data', '{"type": "token", "con');
     proc.stdout.emit('data', 'tent": "Hi"}\n{"type": "done"}\n');
@@ -199,6 +229,9 @@ describe('runInferenceStreaming', () => {
       () => {}
     );
 
+    // Wait for getPythonPath() to resolve before emitting events
+    await new Promise((resolve) => setImmediate(resolve));
+
     proc.stderr.emit('data', 'Model not found locally');
     handlers['close']?.(1);
 
@@ -211,7 +244,7 @@ describe('runInferenceStreaming', () => {
     const { proc, handlers } = createMockProcess();
     vi.mocked(spawn).mockReturnValue(proc);
 
-    runInferenceStreaming(
+    const resultPromise = runInferenceStreaming(
       'mlx-community/Test',
       'Hello world',
       512,
@@ -219,8 +252,11 @@ describe('runInferenceStreaming', () => {
       () => {}
     );
 
+    // Wait a tick for getPythonPath() to resolve
+    await new Promise((resolve) => setImmediate(resolve));
+
     expect(spawn).toHaveBeenCalledWith(
-      'python3',
+      '/mocked/venv/bin/python3',
       expect.arrayContaining([
         'infer',
         'mlx-community/Test',
@@ -230,6 +266,9 @@ describe('runInferenceStreaming', () => {
       ])
     );
 
+    // Emit 'done' token to allow promise to resolve
+    proc.stdout.emit('data', '{"type": "done"}\n');
     handlers['close']?.(0);
+    await resultPromise;
   });
 });
