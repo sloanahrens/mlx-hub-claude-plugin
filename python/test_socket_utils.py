@@ -1,7 +1,11 @@
 """Unit tests for socket_utils.py"""
 
+import sys
 import unittest
 from pathlib import Path
+
+# Add python directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent))
 
 from socket_utils import (
     model_id_to_socket_name,
