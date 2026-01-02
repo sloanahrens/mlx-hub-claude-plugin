@@ -13,11 +13,38 @@ pip install -r python/requirements.txt  # Install Python deps
 ## Architecture
 
 - `src/mcp-server.ts` - MCP server exposing 7 tools
-- `src/daemon-runner.ts` - Manages persistent Python daemon for fast inference
-- `src/python-runner.ts` - Fallback subprocess mode for MLX ops
-- `python/mlx_daemon.py` - Long-running process that keeps models loaded in memory
+- `src/daemon-client.ts` - Client for connecting to shared Python daemons over Unix sockets
+- `src/socket-utils.ts` - Socket path utilities and daemon directory management
+- `src/python-runner.ts` - Fallback subprocess mode for MLX ops (non-inference)
+- `python/mlx_daemon.py` - Shared daemon process that keeps models loaded in memory
 - `python/mlx_runner.py` - CLI for search, download, list, remove, infer, info
-- `commands/` - Slash commands (/mlx search, download, models, run, info, status)
+- `commands/` - Slash commands (/mlx search, download, models, run, info, status, daemon)
+
+## Shared Daemon Architecture
+
+The daemon uses Unix sockets for cross-session model sharing:
+
+- Daemons run at `~/.mlx-hub/daemons/<model>.sock`
+- Multiple Claude Code sessions share the same daemon
+- Models auto-unload after 30 minutes of inactivity
+- Each model gets its own daemon process with a corresponding PID file
+
+### Daemon Commands
+
+```bash
+/mlx daemon status       # List running daemons with memory usage
+/mlx daemon stop <model> # Stop a specific daemon
+/mlx daemon stop-all     # Stop all running daemons
+/mlx daemon preload <model> # Pre-load a model for faster first inference
+```
+
+### How It Works
+
+1. When inference is requested, `DaemonClient` checks if a daemon exists for the model
+2. If no daemon is running, it spawns `python/mlx_daemon.py` which creates a Unix socket
+3. The MCP server connects to the socket and sends JSON-RPC requests
+4. The daemon keeps the model loaded in memory for fast subsequent requests
+5. After 30 minutes of inactivity, the daemon automatically shuts down
 
 ## Testing
 

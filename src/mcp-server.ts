@@ -23,10 +23,14 @@ import {
   runInferenceStreaming,
   StreamToken,
 } from './python-runner.js';
+import { DaemonClient } from './daemon-client.js';
+// Keep old daemon-runner as fallback for subprocess mode
 import { daemonManager } from './daemon-runner.js';
 
-// Track whether to use daemon mode (can be disabled on failure)
-let useDaemonMode = true;
+// Track whether to use socket daemon mode (can be disabled on failure)
+let useSocketDaemon = true;
+// Track whether to use old subprocess daemon (fallback if socket fails)
+let useSubprocessDaemon = true;
 
 // Create MCP Server
 const server = new Server(
@@ -249,8 +253,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // Determine if using messages mode or prompt mode
       const useMessagesMode = params.messages !== undefined && params.messages.length > 0;
 
-      // Try daemon mode first (keeps model loaded for fast inference)
-      if (useDaemonMode) {
+      // Try socket daemon first (new shared daemon via Unix socket)
+      if (useSocketDaemon) {
+        const client = new DaemonClient(params.model_id);
+        try {
+          await client.connect();
+
+          const result = await client.infer({
+            prompt: useMessagesMode ? undefined : params.prompt,
+            messages: useMessagesMode ? params.messages : undefined,
+            system_prompt: params.system_prompt,
+            max_tokens: params.max_tokens,
+            temperature: params.temperature,
+          });
+
+          if (!result.success) {
+            return {
+              content: [{ type: 'text', text: `Error: ${result.error}` }],
+              isError: true,
+            };
+          }
+
+          const modeLabel = useMessagesMode ? 'chat' : 'prompt';
+          return {
+            content: [{
+              type: 'text',
+              text: `${result.output}\n\n---\n${result.tokens_generated} tokens @ ${result.tokens_per_sec} tok/s (socket daemon, ${modeLabel})`
+            }],
+          };
+        } catch (socketError) {
+          // Socket daemon failed, try subprocess daemon
+          console.error('Socket daemon failed, trying subprocess daemon:', socketError);
+          useSocketDaemon = false;
+        } finally {
+          await client.close().catch(() => {}); // Ensure close even on error
+        }
+      }
+
+      // Fallback 1: old subprocess daemon mode
+      if (useSubprocessDaemon) {
         try {
           let result;
 
@@ -284,21 +325,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return {
             content: [{
               type: 'text',
-              text: `${result.output}\n\n---\n${result.tokens_generated} tokens @ ${result.tokens_per_sec} tok/s (daemon, ${modeLabel})`
+              text: `${result.output}\n\n---\n${result.tokens_generated} tokens @ ${result.tokens_per_sec} tok/s (subprocess daemon, ${modeLabel})`
             }],
           };
         } catch (daemonError) {
-          // Daemon failed, fall back to subprocess mode
-          console.error('Daemon mode failed, falling back to subprocess:', daemonError);
-          useDaemonMode = false;
+          // Subprocess daemon failed, fall back to cold start
+          console.error('Subprocess daemon failed, falling back to cold start:', daemonError);
+          useSubprocessDaemon = false;
         }
       }
 
-      // Fallback: subprocess mode (cold start each time)
+      // Fallback 2: cold start subprocess mode (no daemon)
       // Note: subprocess mode only supports single prompts for now
       if (useMessagesMode) {
         return {
-          content: [{ type: 'text', text: 'Error: messages mode requires daemon (subprocess fallback does not support multi-turn)' }],
+          content: [{ type: 'text', text: 'Error: messages mode requires daemon (socket and subprocess daemons both unavailable)' }],
           isError: true,
         };
       }
@@ -375,25 +416,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === 'mlx_status') {
       try {
-        if (!useDaemonMode) {
-          return {
-            content: [{ type: 'text', text: 'Daemon mode: disabled (using subprocess fallback)\nNo model loaded in memory.' }],
-          };
+        const lines: string[] = [];
+
+        // Socket daemon status
+        if (useSocketDaemon) {
+          lines.push('Socket daemon: enabled (will start on first request)');
+        } else {
+          lines.push('Socket daemon: disabled');
         }
 
-        if (!daemonManager.isRunning()) {
-          return {
-            content: [{ type: 'text', text: 'Daemon mode: enabled but not started\nDaemon will start on first inference request.' }],
-          };
+        // Subprocess daemon status
+        if (useSubprocessDaemon) {
+          if (!daemonManager.isRunning()) {
+            lines.push('Subprocess daemon: enabled but not started');
+          } else {
+            const status = await daemonManager.getStatus();
+            lines.push('Subprocess daemon: active');
+            if (status.loaded_model) {
+              lines.push(`  Loaded model: ${status.loaded_model}`);
+            }
+          }
+        } else {
+          lines.push('Subprocess daemon: disabled');
         }
 
-        const status = await daemonManager.getStatus();
-        const lines = [
-          'Daemon mode: active',
-          status.loaded_model
-            ? `Loaded model: ${status.loaded_model}`
-            : 'No model currently loaded',
-        ];
+        // Cold start fallback
+        if (!useSocketDaemon && !useSubprocessDaemon) {
+          lines.push('Fallback: cold start subprocess (no daemon)');
+        }
 
         return {
           content: [{ type: 'text', text: lines.join('\n') }],
