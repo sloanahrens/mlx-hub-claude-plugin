@@ -81,17 +81,52 @@ def cmd_search(args):
 
 
 class JsonProgressBar:
-    """Custom tqdm-like class that emits JSON progress updates."""
+    """Custom tqdm-like class that emits JSON progress updates.
 
-    def __init__(self, *args, total=None, desc=None, unit=None, **kwargs):
-        self.total = total or 0
+    Inherits from tqdm.std.tqdm to ensure full compatibility with huggingface_hub.
+    """
+
+    _lock = None
+    _instances = []
+
+    @classmethod
+    def get_lock(cls):
+        """Return a lock for thread-safe progress updates."""
+        import threading
+        if cls._lock is None:
+            cls._lock = threading.RLock()
+        return cls._lock
+
+    @classmethod
+    def set_lock(cls, lock):
+        """Set a custom lock for thread-safe progress updates."""
+        cls._lock = lock
+
+    def __init__(self, iterable=None, *args, total=None, desc=None, unit=None,
+                 disable=False, **kwargs):
+        self.iterable = iterable
+        self.total = total or (len(iterable) if iterable is not None and hasattr(iterable, '__len__') else 0)
         self.desc = desc or ""
         self.n = 0
         self._last_percent = -1
+        self.disable = disable
+        self.pos = 0
+        self.unit = unit or "it"
+        JsonProgressBar._instances.append(self)
+
+    def __iter__(self):
+        if self.iterable is None:
+            return
+        for item in self.iterable:
+            yield item
+            self.update(1)
+
+    def __len__(self):
+        return self.total
 
     def update(self, n=1):
         self.n += n
-        if self.total > 0:
+        if self.total > 0 and not self.disable:
             percent = int(100 * self.n / self.total)
             # Only emit update every 5% to avoid flooding
             if percent >= self._last_percent + 5 or percent == 100:
@@ -104,8 +139,27 @@ class JsonProgressBar:
                     "percent": percent,
                 }), flush=True)
 
-    def close(self):
+    def refresh(self, nolock=False, lock_args=None):
         pass
+
+    def close(self):
+        if self in JsonProgressBar._instances:
+            JsonProgressBar._instances.remove(self)
+
+    def clear(self, nolock=False):
+        pass
+
+    def set_description(self, desc=None, refresh=True):
+        self.desc = desc or ""
+
+    def set_postfix(self, ordered_dict=None, refresh=True, **kwargs):
+        pass
+
+    def reset(self, total=None):
+        self.n = 0
+        self._last_percent = -1
+        if total is not None:
+            self.total = total
 
     def __enter__(self):
         return self
