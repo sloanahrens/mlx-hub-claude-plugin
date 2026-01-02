@@ -2,6 +2,7 @@
  * Environment Setup - manages uv-based Python virtual environment for MLX operations.
  */
 
+import { execFileSync } from 'child_process';
 import { readFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { homedir } from 'os';
@@ -28,4 +29,17 @@ export function getVenvPythonPath(): string {
 export function getRequirementsHash(): string {
   const content = readFileSync(REQUIREMENTS_PATH, 'utf-8');
   return createHash('sha256').update(content).digest('hex');
+}
+
+/**
+ * Check if uv is installed and available in PATH.
+ * Uses execFileSync (not exec) to avoid shell injection vulnerabilities.
+ */
+export function checkUvInstalled(): boolean {
+  try {
+    execFileSync('uv', ['--version'], { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
 }

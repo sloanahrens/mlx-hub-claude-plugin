@@ -1,8 +1,19 @@
 // src/__tests__/env-setup.test.ts
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { homedir } from 'os';
 import { join } from 'path';
-import { MLX_HUB_DIR, VENV_DIR, PYTHON_READY_FILE, getVenvPythonPath, getRequirementsHash } from '../env-setup.js';
+import { MLX_HUB_DIR, VENV_DIR, PYTHON_READY_FILE, getVenvPythonPath, getRequirementsHash, checkUvInstalled } from '../env-setup.js';
+
+// Mock child_process
+vi.mock('child_process', async () => {
+  const actual = await vi.importActual('child_process');
+  return {
+    ...actual,
+    execFileSync: vi.fn(),
+  };
+});
+
+import { execFileSync } from 'child_process';
 
 describe('env-setup constants', () => {
   it('defines correct directory paths', () => {
@@ -26,5 +37,23 @@ describe('getRequirementsHash', () => {
     const hash1 = getRequirementsHash();
     const hash2 = getRequirementsHash();
     expect(hash1).toBe(hash2);
+  });
+});
+
+describe('checkUvInstalled', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns true when uv is found', () => {
+    vi.mocked(execFileSync).mockReturnValue(Buffer.from('uv 0.5.11\n'));
+    expect(checkUvInstalled()).toBe(true);
+  });
+
+  it('returns false when uv is not found', () => {
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw new Error('command not found');
+    });
+    expect(checkUvInstalled()).toBe(false);
   });
 });
