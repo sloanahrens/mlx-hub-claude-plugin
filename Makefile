@@ -2,7 +2,7 @@
 # ================
 # Build and test automation for the MLX Hub Claude Code plugin
 
-.PHONY: help install build test test-ts test-py test-watch typecheck clean all
+.PHONY: help install build test test-ts test-py test-watch typecheck clean all check-deps reset-python
 
 # Default target
 help:
@@ -20,20 +20,20 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  test         Run all tests (TypeScript + Python)"
-	@echo "  test-ts      Run TypeScript tests only (59 tests)"
-	@echo "  test-py      Run Python tests only (23 tests)"
+	@echo "  test-ts      Run TypeScript tests only (117 tests)"
+	@echo "  test-py      Run Python tests only (15 tests)"
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  clean        Remove build artifacts"
+	@echo "  reset-python Reset Python environment (forces reinstall)"
+	@echo "  check-deps   Verify required tools are installed"
 	@echo "  all          Full check: install, build, test"
 
-# Install all dependencies
-install:
-	@echo "Installing Node dependencies..."
-	npm install
-	@echo "Installing Python dependencies..."
-	pip3 install -q -r python/requirements.txt
-	@echo "Dependencies installed."
+# Install - now requires uv for Python environment management
+# Python deps are auto-installed on first use via ~/.mlx-hub/venv/
+install: build
+	@echo "Build complete. Python environment will be auto-configured on first use."
+	@echo "Note: Requires 'uv' - install with: brew install uv"
 
 # Build TypeScript
 build:
@@ -50,7 +50,7 @@ typecheck:
 # Run all tests
 test: test-ts test-py
 	@echo ""
-	@echo "All tests passed! (59 TS + 23 Python = 82 total)"
+	@echo "All tests passed! (117 TS + 15 Python = 132 total)"
 
 # Run TypeScript tests only
 test-ts:
@@ -71,6 +71,18 @@ clean:
 	@echo "Cleaning build artifacts..."
 	rm -rf dist/
 	@echo "Clean complete."
+
+# Reset the Python environment - forces reinstall on next use
+reset-python:
+	@echo "Removing Python environment..."
+	rm -rf ~/.mlx-hub/venv
+	rm -f ~/.mlx-hub/.python-ready
+	@echo "Python environment reset. Will be reinstalled on next use."
+
+# Check if required dependencies are installed
+check-deps:
+	@command -v uv >/dev/null 2>&1 || { echo "Error: 'uv' is required. Install with: brew install uv"; exit 1; }
+	@echo "All dependencies OK"
 
 # Full check: install, build, and test
 all: install build test
