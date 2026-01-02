@@ -12,6 +12,9 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REQUIREMENTS_PATH = join(__dirname, '..', 'python', 'requirements.txt');
 
+// Module-level cache for Python path
+let cachedPythonPath: string | null = null;
+
 export const MLX_HUB_DIR = join(homedir(), '.mlx-hub');
 export const VENV_DIR = join(MLX_HUB_DIR, 'venv');
 export const PYTHON_READY_FILE = join(MLX_HUB_DIR, '.python-ready');
@@ -129,4 +132,25 @@ export async function ensurePythonEnv(markerPath: string = PYTHON_READY_FILE): P
   });
 
   return getVenvPythonPath();
+}
+
+/**
+ * Get path to the Python binary, using cache to avoid repeated ensurePythonEnv calls.
+ * This is the primary function other modules should use to get the Python path.
+ *
+ * @returns Path to the Python binary in the venv
+ */
+export async function getPythonPath(): Promise<string> {
+  if (cachedPythonPath) {
+    return cachedPythonPath;
+  }
+  cachedPythonPath = await ensurePythonEnv();
+  return cachedPythonPath;
+}
+
+/**
+ * Reset the Python path cache. Exported for test isolation.
+ */
+export function resetPythonPathCache(): void {
+  cachedPythonPath = null;
 }

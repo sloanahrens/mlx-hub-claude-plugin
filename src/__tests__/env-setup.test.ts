@@ -4,7 +4,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
-import { MLX_HUB_DIR, VENV_DIR, PYTHON_READY_FILE, getVenvPythonPath, getRequirementsHash, checkUvInstalled, MarkerData, readMarkerFile, writeMarkerFile, ensurePythonEnv } from '../env-setup.js';
+import { MLX_HUB_DIR, VENV_DIR, PYTHON_READY_FILE, getVenvPythonPath, getRequirementsHash, checkUvInstalled, MarkerData, readMarkerFile, writeMarkerFile, ensurePythonEnv, getPythonPath, resetPythonPathCache } from '../env-setup.js';
 
 // Mock child_process
 vi.mock('child_process', async () => {
@@ -274,5 +274,90 @@ describe('ensurePythonEnv', () => {
     expect(savedMarker.requirements_hash).not.toBe('old-hash-that-does-not-match');
 
     expect(result).toBe(getVenvPythonPath());
+  });
+});
+
+describe('getPythonPath', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetPythonPathCache();
+  });
+
+  afterEach(() => {
+    resetPythonPathCache();
+  });
+
+  it('returns cached path on second call', async () => {
+    // First call - will call ensurePythonEnv which may hit real marker file (fast path)
+    const path1 = await getPythonPath();
+
+    // Second call - should use cache
+    const path2 = await getPythonPath();
+
+    // Both should return the same path
+    expect(path1).toBe(path2);
+    // Should be the venv python path
+    expect(path1).toBe(getVenvPythonPath());
+  });
+
+  it('calls ensurePythonEnv only once with cache', async () => {
+    // Setup: mock uv to track calls (this triggers the slow path in ensurePythonEnv
+    // when marker file doesn't match or doesn't exist)
+    let uvCalls = 0;
+    vi.mocked(execFileSync).mockImplementation((cmd, args, options) => {
+      if (cmd === 'uv') {
+        uvCalls++;
+        if (args?.[0] === '--version') {
+          const result = 'uv 0.5.11\n';
+          if (options && typeof options === 'object' && 'encoding' in options) {
+            return result;
+          }
+          return Buffer.from(result);
+        }
+      }
+      return Buffer.from('');
+    });
+
+    // Call getPythonPath - will call ensurePythonEnv internally
+    await getPythonPath();
+    const uvCallsAfterFirst = uvCalls;
+
+    // Call again - should use cache, NOT call ensurePythonEnv
+    await getPythonPath();
+    await getPythonPath();
+
+    // The number of uv calls should NOT have increased after first getPythonPath
+    // (because subsequent calls use the cache and don't go through ensurePythonEnv)
+    expect(uvCalls).toBe(uvCallsAfterFirst);
+  });
+});
+
+describe('resetPythonPathCache', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetPythonPathCache();
+  });
+
+  afterEach(() => {
+    resetPythonPathCache();
+  });
+
+  it('clears the cache allowing ensurePythonEnv to be called again', async () => {
+    // First call
+    const path1 = await getPythonPath();
+
+    // Second call - uses cache
+    const path2 = await getPythonPath();
+    expect(path1).toBe(path2);
+
+    // Reset the cache
+    resetPythonPathCache();
+
+    // Third call - should still work (cache was cleared, so it calls ensurePythonEnv again)
+    const path3 = await getPythonPath();
+
+    // All paths should be the same (the venv python path)
+    expect(path3).toBe(path1);
+    expect(path3).toBe(getVenvPythonPath());
   });
 });
