@@ -2,6 +2,8 @@
 
 A Claude Code plugin for discovering, downloading, and running Hugging Face models locally using MLX on Apple Silicon.
 
+> **See also:** [slash-commands](https://github.com/sloanahrens/slash-commands) - Portable slash commands for multi-repo workspace management
+
 ## Requirements
 
 - Apple Silicon Mac (M1/M2/M3/M4)
