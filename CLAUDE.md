@@ -75,7 +75,7 @@ To avoid reinstalling after every change, symlink the plugin cache to this repo:
 ```bash
 # Remove the cache copy and symlink to dev repo
 rm -rf ~/.claude/plugins/cache/mlx-hub-dev/mlx-hub/0.1.0
-ln -s /Users/sloan/code/mono-claude/mlx-hub ~/.claude/plugins/cache/mlx-hub-dev/mlx-hub/0.1.0
+ln -s /Users/sloan/code/mono-claude/mlx-hub-claude-plugin ~/.claude/plugins/cache/mlx-hub-dev/mlx-hub/0.1.0
 ```
 
 After symlinking, the dev workflow is:

@@ -1,6 +1,6 @@
 {
-  "name": "mlx-hub-dev",
-  "description": "Development marketplace for mlx-hub plugin",
+  "name": "mlx-hub",
+  "description": "Local ML model inference with MLX",
   "owner": {
     "name": "sloan"
   },
