@@ -82,6 +82,6 @@ claude plugin update mlx-hub@mlx-hub    # Sync changes to plugin cache
 
 **First-time setup** (if not already registered):
 ```bash
-claude plugin marketplace add ~/code/mono-claude/mlx-hub-claude-plugin
+claude plugin marketplace add ~/code/mlx-hub-claude-plugin
 claude plugin install mlx-hub@mlx-hub
 ```
