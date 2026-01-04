@@ -70,18 +70,18 @@ python3 python/mlx_runner.py search "llama" --limit 5
 
 ## Development Setup
 
-To avoid reinstalling after every change, symlink the plugin cache to this repo:
+This plugin is registered as a local marketplace in Claude Code, pointing to this repo.
 
+**Dev workflow:**
 ```bash
-# Remove the cache copy and symlink to dev repo
-rm -rf ~/.claude/plugins/cache/mlx-hub-dev/mlx-hub/0.1.0
-ln -s /Users/sloan/code/mono-claude/mlx-hub-claude-plugin ~/.claude/plugins/cache/mlx-hub-dev/mlx-hub/0.1.0
+# After editing code
+npm run build                           # Build TypeScript
+claude plugin update mlx-hub@mlx-hub    # Sync changes to plugin cache
+# Restart Claude Code if MCP server changed
 ```
 
-After symlinking, the dev workflow is:
-1. Edit code in this repo
-2. Run `npm run build`
-3. Changes are live immediately
-4. Only restart Claude Code if the MCP server needs a full reload
-
-**Note**: If you bump version in `plugin.json`, update the symlink path to match (e.g., `0.2.0`).
+**First-time setup** (if not already registered):
+```bash
+claude plugin marketplace add ~/code/mono-claude/mlx-hub-claude-plugin
+claude plugin install mlx-hub@mlx-hub
+```
